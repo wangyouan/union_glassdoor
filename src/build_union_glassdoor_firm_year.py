@@ -13,8 +13,8 @@ import pandas as pd
 UNION_PATH = Path(
     "/data/disk4/workspace/projects/union/outputs/union_election_rc_votes_gvkey_only.parquet"
 )
-GLASSDOOR_FIRM_YEAR_ZIP = Path(
-    "/data/disk5/projects/shared_glassdoor_data/firm_year_glassdoor.zip"
+GLASSDOOR_FIRM_YEAR_PATH = Path(
+    "/data/disk4/workspace/projects/glassdoor/data/firm_year_glassdoor.csv"
 )
 CONTROLS_PATH = Path(
     "/data/disk4/workspace/projects/union_glassdoor/outputs/compustat_firm_controls.parquet"
@@ -108,9 +108,26 @@ def detect_column(df: pd.DataFrame, candidates: Sequence[str], required: bool = 
     return col
 
 
-def load_glassdoor_firm_year_zip(path: Path) -> pd.DataFrame:
+def find_curr_columns(df: pd.DataFrame) -> List[str]:
+    return [c for c in df.columns if c.lower().endswith("_curr")]
+
+
+def load_glassdoor_firm_year(path: Path) -> pd.DataFrame:
     if not path.exists():
         raise FileNotFoundError(f"Missing file: {path}")
+
+    lower = path.name.lower()
+    if lower.endswith(".csv"):
+        print(f"Reading firm-year file: {path}")
+        return pd.read_csv(path)
+    if lower.endswith(".parquet"):
+        print(f"Reading firm-year file: {path}")
+        return pd.read_parquet(path)
+    if lower.endswith(".pkl") or lower.endswith(".pickle"):
+        print(f"Reading firm-year file: {path}")
+        return pd.read_pickle(path)
+    if not lower.endswith(".zip"):
+        raise ValueError(f"Unsupported Glassdoor firm-year file type: {path}")
 
     with zipfile.ZipFile(path, "r") as zf:
         names = [n for n in zf.namelist() if not n.endswith("/")]
@@ -142,7 +159,7 @@ def load_glassdoor_firm_year_zip(path: Path) -> pd.DataFrame:
 
 def load_inputs() -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     union = pd.read_parquet(UNION_PATH)
-    gd = load_glassdoor_firm_year_zip(GLASSDOOR_FIRM_YEAR_ZIP)
+    gd = load_glassdoor_firm_year(GLASSDOOR_FIRM_YEAR_PATH)
     controls = pd.read_parquet(CONTROLS_PATH)
     print(f"Union rows: {len(union):,}")
     print(f"Glassdoor firm-year rows: {len(gd):,}")
@@ -287,6 +304,9 @@ def clean_glassdoor_firm_year(gd: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
+    curr_cols = find_curr_columns(df)
+    print(f"Detected _curr columns: {len(curr_cols):,}")
+
     return df
 
 
@@ -323,19 +343,13 @@ def merge_outcomes(
     gd: pd.DataFrame,
     controls: pd.DataFrame,
 ) -> pd.DataFrame:
-    print_banner("Merge Union with Glassdoor (Contemporaneous and Next-Year)")
-
-    current = union_fy.copy()
-    current["outcome_year"] = current["election_year"]
-    current["outcome_source"] = "contemporaneous"
+    print_banner("Merge Union with Glassdoor (Next-Year Only)")
 
     next_year = union_fy.copy()
     next_year["outcome_year"] = next_year["election_year"] + 1
     next_year["outcome_source"] = "next_year"
 
-    stack = pd.concat([current, next_year], ignore_index=True)
-
-    merged = stack.merge(
+    merged = next_year.merge(
         gd,
         left_on=["gvkey", "outcome_year"],
         right_on=["gvkey", "year"],
@@ -378,8 +392,12 @@ def summarize_final(df: pd.DataFrame) -> None:
         print("\nunion_margin summary:")
         print(df["union_margin"].describe(percentiles=[0.01, 0.5, 0.99]))
 
-    dup_n = int(df.duplicated(["gvkey", "outcome_year", "outcome_source"]).sum())
-    print(f"Duplicate gvkey-year-source count: {dup_n:,}")
+    dup_n = int(df.duplicated(["gvkey", "outcome_year"]).sum())
+    print(f"Duplicate gvkey-year count: {dup_n:,}")
+
+    curr_cols = find_curr_columns(df)
+    if curr_cols:
+        print(f"_curr columns included in final sample: {len(curr_cols):,}")
 
     major = [
         c
@@ -392,6 +410,7 @@ def summarize_final(df: pd.DataFrame) -> None:
         ]
         if c in df.columns
     ]
+    major += [c for c in curr_cols if c not in major]
     if major:
         miss = (
             df[major]
@@ -432,6 +451,20 @@ def make_stata_compatible(df: pd.DataFrame) -> pd.DataFrame:
         print(f"Dropping unsupported object columns for Stata: {drop_cols}")
         out = out.drop(columns=drop_cols)
 
+    text_drop_cols = []
+    for col in out.columns:
+        if out[col].dtype == "object" or pd.api.types.is_string_dtype(out[col]):
+            s = out[col]
+            non_null = s.dropna()
+            if non_null.empty:
+                text_drop_cols.append(col)
+                continue
+            out[col] = s.map(lambda v: None if pd.isna(v) else str(v))
+
+    if text_drop_cols:
+        print(f"Dropping all-null text columns for Stata: {text_drop_cols}")
+        out = out.drop(columns=text_drop_cols)
+
     # Stata variable name constraints: <= 32 chars, [a-zA-Z_][a-zA-Z0-9_]*
     rename = {}
     used = set()
@@ -468,7 +501,22 @@ def winsorize_for_regression(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]
         *LAG_CONTROL_VARS,
         "close_election_abs_margin",
     ]
-    winsor_vars = [c for c in candidate_vars if c in out.columns and pd.api.types.is_numeric_dtype(out[c])]
+    curr_cols = find_curr_columns(out)
+    curr_winsor_candidates = [
+        c
+        for c in curr_cols
+        if pd.api.types.is_numeric_dtype(out[c])
+        and c.lower() not in {"union_margin_curr"}
+        and not c.lower().startswith(("n_", "num_", "count_"))
+        and "count" not in c.lower()
+        and not any(tok in c.lower() for tok in ["_id", "year", "dummy", "indicator", "post_"])
+    ]
+
+    winsor_vars = [
+        c
+        for c in [*candidate_vars, *curr_winsor_candidates]
+        if c in out.columns and pd.api.types.is_numeric_dtype(out[c])
+    ]
 
     for c in winsor_vars:
         low = out[c].quantile(0.01)
