@@ -555,34 +555,17 @@ def make_stata_compatible(df: pd.DataFrame) -> pd.DataFrame:
 def winsorize_for_regression(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
     out = df.copy()
 
-    # Only continuous variables used in regressions; excludes IDs, dummies, years,
-    # vote counts, running variable union_margin, and event-time/day variables.
-    glassdoor_candidates = []
-    for _, suffix in GLASSDOOR_MERGE_SHIFTS:
-        for col in [*MAIN_OUTCOMES, *REVIEW_VOLUME_CONTROLS]:
-            name = f"{col}_{suffix}" if suffix else col
-            glassdoor_candidates.append(name)
-
+    # Only winsorize financial / Compustat control variables.
+    # Glassdoor rating variables (GD_*), review volume counts, and all other
+    # non-financial columns are left unchanged.
     candidate_vars = [
-        *glassdoor_candidates,
         *RAW_CONTROL_VARS,
         *LAG_CONTROL_VARS,
-        "close_election_abs_margin",
-    ]
-    curr_cols = find_curr_columns(out)
-    curr_winsor_candidates = [
-        c
-        for c in curr_cols
-        if pd.api.types.is_numeric_dtype(out[c])
-        and c.lower() not in {"union_margin_curr"}
-        and not c.lower().startswith(("n_", "num_", "count_"))
-        and "count" not in c.lower()
-        and not any(tok in c.lower() for tok in ["_id", "year", "dummy", "indicator", "post_"])
     ]
 
     winsor_vars = [
         c
-        for c in [*candidate_vars, *curr_winsor_candidates]
+        for c in candidate_vars
         if c in out.columns and pd.api.types.is_numeric_dtype(out[c])
     ]
 
