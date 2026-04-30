@@ -14,7 +14,7 @@ UNION_PATH = Path(
     "/data/disk4/workspace/projects/union/outputs/union_election_rc_votes_gvkey_only.parquet"
 )
 GLASSDOOR_FIRM_YEAR_PATH = Path(
-    "/data/disk4/workspace/projects/glassdoor/data/firm_year_glassdoor.csv"
+    "/data/disk4/workspace/projects/glassdoor/outputs/firm_year_glassdoor_union.parquet"
 )
 CONTROLS_PATH = Path(
     "/data/disk4/workspace/projects/union_glassdoor/outputs/compustat_firm_controls.parquet"
@@ -29,15 +29,15 @@ OUT_WINSOR_LOG = OUT_DIR / "union_glassdoor_firm_year_winsorized_vars.json"
 
 MAIN_OUTCOMES = [
     "GD_rating",
+    "GD_outlook",
     "GD_career_opp",
+    "GD_ceo",
     "GD_comp_benefit",
     "GD_senior_mgmt",
     "GD_wlb",
     "GD_culture",
     "GD_diversity",
-    "pct_recommend",
-    "pct_ceo_approve",
-    "pct_positive_outlook",
+    "GD_recommend",
 ]
 
 REVIEW_VOLUME_CONTROLS = [
@@ -75,6 +75,12 @@ RAW_CONTROL_VARS = [
     "book_to_market",
     "sales_growth",
     "log_emp",
+]
+
+GLASSDOOR_MERGE_SHIFTS = [
+    (-1, "lag1"),
+    (0, ""),
+    (1, "for1"),
 ]
 
 
@@ -254,7 +260,7 @@ def clean_glassdoor_firm_year(gd: pd.DataFrame) -> pd.DataFrame:
     df = gd.copy()
 
     gv_col = detect_column(df, ["gvkey", "gvkey_final", "gvkey6"])
-    year_col = detect_column(df, ["year", "fyear", "calendar_year"])
+    year_col = detect_column(df, ["year", "review_year", "fyear", "calendar_year"])
 
     df[gv_col] = standardize_gvkey(df[gv_col])
     df[year_col] = pd.to_numeric(df[year_col], errors="coerce").astype("Int64")
@@ -310,6 +316,29 @@ def clean_glassdoor_firm_year(gd: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def build_glassdoor_period_frames(gd: pd.DataFrame) -> dict[str, pd.DataFrame]:
+    gd_cols = [c for c in gd.columns if c not in {"gvkey", "year"}]
+    out: dict[str, pd.DataFrame] = {}
+
+    for shift, suffix in GLASSDOOR_MERGE_SHIFTS:
+        target_year_col = {
+            -1: "gd_year_lag1",
+            0: "gd_year",
+            1: "gd_year_for1",
+        }[shift]
+
+        frame = gd[["gvkey", "year", *gd_cols]].copy()
+        frame = frame.rename(columns={"year": target_year_col})
+
+        rename_map = {}
+        for col in gd_cols:
+            rename_map[col] = f"{col}_{suffix}" if suffix else col
+        frame = frame.rename(columns=rename_map)
+        out[suffix or "curr"] = frame
+
+    return out
+
+
 def prepare_controls(controls: pd.DataFrame) -> pd.DataFrame:
     print_banner("Prepare Compustat Controls")
     df = controls.copy()
@@ -343,34 +372,50 @@ def merge_outcomes(
     gd: pd.DataFrame,
     controls: pd.DataFrame,
 ) -> pd.DataFrame:
-    print_banner("Merge Union with Glassdoor (Next-Year Only)")
+    print_banner("Merge Union with Glassdoor (t-1, t, t+1)")
 
-    next_year = union_fy.copy()
-    next_year["outcome_year"] = next_year["election_year"] + 1
-    next_year["outcome_source"] = "next_year"
+    merged = union_fy.copy()
+    merged["gd_year_lag1"] = merged["election_year"] - 1
+    merged["gd_year"] = merged["election_year"]
+    merged["gd_year_for1"] = merged["election_year"] + 1
 
-    merged = next_year.merge(
-        gd,
-        left_on=["gvkey", "outcome_year"],
-        right_on=["gvkey", "year"],
-        how="left",
-        indicator="merge_union_glassdoor",
-    )
-
-    merged["post_election_year"] = (merged["outcome_year"] > merged["election_year"]).astype("Int8")
-    merged["event_year"] = (merged["outcome_year"] - merged["election_year"]).astype("Int64")
+    gd_frames = build_glassdoor_period_frames(gd)
 
     merged = merged.merge(
+        gd_frames["lag1"],
+        left_on=["gvkey", "gd_year_lag1"],
+        right_on=["gvkey", "gd_year_lag1"],
+        how="left",
+        indicator="merge_union_glassdoor_lag1",
+    )
+
+    merged = merged.merge(
+        gd_frames["curr"],
+        left_on=["gvkey", "gd_year"],
+        right_on=["gvkey", "gd_year"],
+        how="left",
+        indicator="merge_union_glassdoor_curr",
+    )
+
+    merged = merged.merge(
+        gd_frames["for1"],
+        left_on=["gvkey", "gd_year_for1"],
+        right_on=["gvkey", "gd_year_for1"],
+        how="left",
+        indicator="merge_union_glassdoor_for1",
+    )
+
+    merged["control_year"] = merged["election_year"]
+    merged = merged.merge(
         controls,
-        left_on=["gvkey", "outcome_year"],
+        left_on=["gvkey", "control_year"],
         right_on=["gvkey", "year"],
         how="left",
         indicator="merge_controls",
         suffixes=("", "_ctrl"),
     )
 
-    # Keep one row per gvkey-outcome_year-outcome_source-election record.
-    key = [c for c in ["gvkey", "outcome_year", "outcome_source", "election_id", "case_number"] if c in merged.columns]
+    key = [c for c in ["gvkey", "election_year", "election_id", "case_number"] if c in merged.columns]
     if key:
         merged = merged.drop_duplicates(key, keep="first").copy()
 
@@ -381,8 +426,8 @@ def summarize_final(df: pd.DataFrame) -> None:
     print_banner("Final Validation")
     print(f"Final shape: {df.shape}")
     print(f"Unique firms: {df['gvkey'].nunique():,}")
-    if "outcome_year" in df.columns:
-        print(f"Year range: {int(df['outcome_year'].min())} to {int(df['outcome_year'].max())}")
+    if "election_year" in df.columns:
+        print(f"Election year range: {int(df['election_year'].min())} to {int(df['election_year'].max())}")
 
     if "win_union" in df.columns:
         print("\nwin_union distribution:")
@@ -392,18 +437,31 @@ def summarize_final(df: pd.DataFrame) -> None:
         print("\nunion_margin summary:")
         print(df["union_margin"].describe(percentiles=[0.01, 0.5, 0.99]))
 
-    dup_n = int(df.duplicated(["gvkey", "outcome_year"]).sum())
-    print(f"Duplicate gvkey-year count: {dup_n:,}")
+    dup_key = [c for c in ["gvkey", "election_year", "election_id", "case_number"] if c in df.columns]
+    dup_n = int(df.duplicated(dup_key).sum()) if dup_key else 0
+    print(f"Duplicate final-key count: {dup_n:,}")
 
     curr_cols = find_curr_columns(df)
     if curr_cols:
         print(f"_curr columns included in final sample: {len(curr_cols):,}")
 
+    period_outcomes = []
+    period_review_controls = []
+    for _, suffix in GLASSDOOR_MERGE_SHIFTS:
+        for col in MAIN_OUTCOMES:
+            name = f"{col}_{suffix}" if suffix else col
+            if name in df.columns:
+                period_outcomes.append(name)
+        for col in REVIEW_VOLUME_CONTROLS:
+            name = f"{col}_{suffix}" if suffix else col
+            if name in df.columns:
+                period_review_controls.append(name)
+
     major = [
         c
         for c in [
-            *MAIN_OUTCOMES,
-            *REVIEW_VOLUME_CONTROLS,
+            *period_outcomes,
+            *period_review_controls,
             "union_margin",
             "win_union",
             *LAG_CONTROL_VARS,
@@ -423,9 +481,14 @@ def summarize_final(df: pd.DataFrame) -> None:
         print("\nMissingness report for major outcomes/controls:")
         print(miss.round(4))
 
-    if "merge_union_glassdoor" in df.columns:
-        print("\nUnion-Glassdoor merge diagnostics:")
-        print(df["merge_union_glassdoor"].value_counts(dropna=False))
+    for merge_col in [
+        "merge_union_glassdoor_lag1",
+        "merge_union_glassdoor_curr",
+        "merge_union_glassdoor_for1",
+    ]:
+        if merge_col in df.columns:
+            print(f"\n{merge_col} diagnostics:")
+            print(df[merge_col].value_counts(dropna=False))
     if "merge_controls" in df.columns:
         print("\nControls merge diagnostics:")
         print(df["merge_controls"].value_counts(dropna=False))
@@ -494,9 +557,14 @@ def winsorize_for_regression(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]
 
     # Only continuous variables used in regressions; excludes IDs, dummies, years,
     # vote counts, running variable union_margin, and event-time/day variables.
+    glassdoor_candidates = []
+    for _, suffix in GLASSDOOR_MERGE_SHIFTS:
+        for col in [*MAIN_OUTCOMES, *REVIEW_VOLUME_CONTROLS]:
+            name = f"{col}_{suffix}" if suffix else col
+            glassdoor_candidates.append(name)
+
     candidate_vars = [
-        *MAIN_OUTCOMES,
-        "pct_current",
+        *glassdoor_candidates,
         *RAW_CONTROL_VARS,
         *LAG_CONTROL_VARS,
         "close_election_abs_margin",
@@ -572,8 +640,8 @@ def main() -> None:
 
     merged = merge_outcomes(union_one, gd_clean, controls)
 
-    # Keep one row per firm-year outcome observation in final file.
-    key = [c for c in ["gvkey", "outcome_year", "outcome_source", "election_id", "case_number"] if c in merged.columns]
+    # Keep one row per election record in final file.
+    key = [c for c in ["gvkey", "election_year", "election_id", "case_number"] if c in merged.columns]
     if key:
         merged = merged.drop_duplicates(key, keep="first").copy()
 
