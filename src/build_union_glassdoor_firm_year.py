@@ -83,6 +83,19 @@ GLASSDOOR_MERGE_SHIFTS = [
     (1, "for1"),
 ]
 
+RATING_BASE_SUFFIXES = [
+    "GD_rating",
+    "GD_outlook",
+    "GD_career_opp",
+    "GD_ceo",
+    "GD_comp_benefit",
+    "GD_senior_mgmt",
+    "GD_wlb",
+    "GD_culture",
+    "GD_diversity",
+    "GD_recommend",
+]
+
 
 def print_banner(title: str) -> None:
     print("\n" + "=" * 88)
@@ -116,6 +129,106 @@ def detect_column(df: pd.DataFrame, candidates: Sequence[str], required: bool = 
 
 def find_curr_columns(df: pd.DataFrame) -> List[str]:
     return [c for c in df.columns if c.lower().endswith("_curr")]
+
+
+def detect_rating_columns(df: pd.DataFrame) -> List[str]:
+    candidates = []
+    suffixes = []
+    for base in RATING_BASE_SUFFIXES:
+        suffixes.extend([base, f"{base}_lag1", f"{base}_for1"])
+
+    for col in df.columns:
+        if any(col.endswith(s) for s in suffixes):
+            if pd.api.types.is_numeric_dtype(df[col]):
+                candidates.append(col)
+
+    return sorted(set(candidates))
+
+
+def _standardize_within_groups(
+    df: pd.DataFrame,
+    col: str,
+    group_keys: Sequence[str],
+) -> pd.Series:
+    vals = pd.to_numeric(df[col], errors="coerce")
+    grp = vals.groupby([df[k] for k in group_keys])
+
+    mean = grp.transform("mean")
+    std = grp.transform("std")
+    count = grp.transform("count")
+
+    out = pd.Series(np.nan, index=df.index, dtype="float64")
+    valid = vals.notna() & mean.notna() & std.notna() & (std != 0) & (count >= 2)
+    out.loc[valid] = (vals.loc[valid] - mean.loc[valid]) / std.loc[valid]
+    return out
+
+
+def add_industry_year_standardized_ratings(df: pd.DataFrame) -> pd.DataFrame:
+    print_banner("Add Industry-Year Standardized Ratings")
+    out = df.copy()
+
+    rating_cols = detect_rating_columns(out)
+    print(f"Detected rating variables for standardization: {len(rating_cols):,}")
+
+    if "sic" in out.columns:
+        print(f"Non-missing sic in merged data: {int(out['sic'].notna().sum()):,}")
+    else:
+        print("WARNING: sic not present in merged data.")
+    if "sic2" in out.columns:
+        print(f"Non-missing sic2 in merged data: {int(out['sic2'].notna().sum()):,}")
+    else:
+        print("WARNING: sic2 not present in merged data; skip _sdsic2.")
+    if "ff48" in out.columns:
+        print(f"Non-missing ff48 in merged data: {int(out['ff48'].notna().sum()):,}")
+    else:
+        print("WARNING: ff48 not present in merged data; skip _sdff48.")
+
+    created_sic2: List[str] = []
+    created_ff48: List[str] = []
+
+    has_sic2_keys = all(k in out.columns for k in ["election_year", "sic2"])
+    has_ff48_keys = all(k in out.columns for k in ["election_year", "ff48"])
+
+    if has_sic2_keys:
+        sic2_cell_n = int(
+            out.loc[out["election_year"].notna() & out["sic2"].notna(), ["election_year", "sic2"]]
+            .drop_duplicates()
+            .shape[0]
+        )
+        print(f"Industry-year cells for sic2: {sic2_cell_n:,}")
+        for c in rating_cols:
+            new_col = f"{c}_sdsic2"
+            out[new_col] = _standardize_within_groups(out, c, ["election_year", "sic2"])
+            created_sic2.append(new_col)
+    else:
+        print("WARNING: missing election_year or sic2; no _sdsic2 variables created.")
+
+    if has_ff48_keys:
+        ff48_cell_n = int(
+            out.loc[out["election_year"].notna() & out["ff48"].notna(), ["election_year", "ff48"]]
+            .drop_duplicates()
+            .shape[0]
+        )
+        print(f"Industry-year cells for ff48: {ff48_cell_n:,}")
+        for c in rating_cols:
+            new_col = f"{c}_sdff48"
+            out[new_col] = _standardize_within_groups(out, c, ["election_year", "ff48"])
+            created_ff48.append(new_col)
+    else:
+        print("WARNING: missing election_year or ff48; no _sdff48 variables created.")
+
+    created_all = [*created_sic2, *created_ff48]
+    print(f"Created _sdsic2 variables: {len(created_sic2):,}")
+    print(f"Created _sdff48 variables: {len(created_ff48):,}")
+    if created_all:
+        print(f"Example standardized vars (first 10): {created_all[:10]}")
+        miss = out[created_all].isna().mean()
+        print(
+            "Standardized vars missingness (mean/min/max): "
+            f"{miss.mean():.4f} / {miss.min():.4f} / {miss.max():.4f}"
+        )
+
+    return out
 
 
 def load_glassdoor_firm_year(path: Path) -> pd.DataFrame:
@@ -345,8 +458,32 @@ def prepare_controls(controls: pd.DataFrame) -> pd.DataFrame:
     gv_col = detect_column(df, ["gvkey"])
     year_col = detect_column(df, ["fyear", "year"])
 
+    has_sic = "sic" in df.columns
+    has_sic2 = "sic2" in df.columns
+    has_ff48 = "ff48" in df.columns
+    print(f"Controls has sic: {has_sic}")
+    print(f"Controls has sic2: {has_sic2}")
+    print(f"Controls has ff48: {has_ff48}")
+    if not has_ff48:
+        print("WARNING: ff48 not found in controls; proceeding without ff48 standardization.")
+
     df[gv_col] = standardize_gvkey(df[gv_col])
     df[year_col] = pd.to_numeric(df[year_col], errors="coerce").astype("Int64")
+
+    if has_sic:
+        df["sic"] = pd.to_numeric(df["sic"], errors="coerce")
+    if has_sic2:
+        df["sic2"] = pd.to_numeric(df["sic2"], errors="coerce")
+    elif has_sic:
+        df["sic2"] = np.floor(df["sic"] / 100.0)
+        print("Constructed sic2 from sic using floor(sic / 100).")
+    else:
+        print("WARNING: both sic and sic2 are missing in controls; skip sic2 standardization.")
+
+    if "sic2" in df.columns:
+        df["sic2"] = pd.to_numeric(df["sic2"], errors="coerce").astype("Int64")
+    if has_ff48:
+        df["ff48"] = pd.to_numeric(df["ff48"], errors="coerce").astype("Int64")
     df = df[df[gv_col].notna() & df[year_col].notna()].copy()
 
     keep_cols = [
@@ -357,6 +494,9 @@ def prepare_controls(controls: pd.DataFrame) -> pd.DataFrame:
             "conm",
             "tic",
             "cik",
+            "sic",
+            "sic2",
+            "ff48",
             *RAW_CONTROL_VARS,
             *LAG_CONTROL_VARS,
         ]
@@ -627,6 +767,8 @@ def main() -> None:
     key = [c for c in ["gvkey", "election_year", "election_id", "case_number"] if c in merged.columns]
     if key:
         merged = merged.drop_duplicates(key, keep="first").copy()
+
+    merged = add_industry_year_standardized_ratings(merged)
 
     summarize_final(merged)
     export_outputs(merged)
