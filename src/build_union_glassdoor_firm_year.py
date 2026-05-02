@@ -458,6 +458,32 @@ def prepare_controls(controls: pd.DataFrame) -> pd.DataFrame:
     gv_col = detect_column(df, ["gvkey"])
     year_col = detect_column(df, ["fyear", "year"])
 
+    # Print all columns so we can see what industry fields are available.
+    print(f"Controls file columns ({len(df.columns)}): {list(df.columns)}")
+    industry_cols = [
+        c for c in df.columns
+        if any(k in c.lower() for k in ["sic", "ff", "fama", "industry", "naics", "gind", "ffi"])
+    ]
+    print(f"Industry-related columns found: {industry_cols}")
+
+    # Rename alternative SIC column names to 'sic'.
+    sic_alt_names = ["siccd", "sich", "sic_compustat", "sic_code"]
+    if "sic" not in df.columns:
+        for alt in sic_alt_names:
+            if alt in df.columns:
+                df = df.rename(columns={alt: "sic"})
+                print(f"Renamed '{alt}' -> 'sic'")
+                break
+
+    # Rename alternative ff48 column names to 'ff48'.
+    ff48_alt_names = ["ff_48", "ffi48", "fama_french_48", "ff_ind48", "ff48_ind", "ffi_48"]
+    if "ff48" not in df.columns:
+        for alt in ff48_alt_names:
+            if alt in df.columns:
+                df = df.rename(columns={alt: "ff48"})
+                print(f"Renamed '{alt}' -> 'ff48'")
+                break
+
     has_sic = "sic" in df.columns
     has_sic2 = "sic2" in df.columns
     has_ff48 = "ff48" in df.columns
@@ -772,6 +798,31 @@ def main() -> None:
 
     summarize_final(merged)
     export_outputs(merged)
+
+    # --- Final validation: fail loudly if required outputs are missing ---
+    errors: list[str] = []
+    pq_df = pd.read_parquet(OUT_PARQUET, columns=None)
+    if "sic" not in pq_df.columns:
+        errors.append("FAIL: 'sic' missing from final parquet. Re-run build_compustat_controls.py to add industry variables.")
+    if "sic2" not in pq_df.columns:
+        errors.append("FAIL: 'sic2' missing from final parquet.")
+    sdsic2_vars = [c for c in pq_df.columns if c.endswith("_sdsic2")]
+    if not sdsic2_vars:
+        errors.append("FAIL: No _sdsic2 standardized variables created. Check sic/sic2 availability in controls.")
+    if "role_likely_unionizable_GD_rating" not in pq_df.columns and \
+       any(c.startswith("role_likely_unionizable") for c in pq_df.columns):
+        errors.append("FAIL: role_likely_unionizable_GD_rating missing but other role columns exist — firm-year aggregation may not have created role subgroup ratings.")
+    elif not any(c.startswith("role_likely_unionizable") for c in pq_df.columns):
+        print("WARNING: role_likely_unionizable_GD_rating not in final file — firm-year aggregation step did not create role subgroup rating outcomes. Re-run build_firm_year_aggregates.py.")
+    if errors:
+        print("\n" + "=" * 88)
+        print("VALIDATION ERRORS:")
+        for e in errors:
+            print(f"  {e}")
+        print("=" * 88)
+        raise RuntimeError("Final regression dataset is missing required variables. See validation errors above.")
+    else:
+        print("\nValidation passed: sic, sic2, and _sdsic2 variables are all present.")
 
 
 if __name__ == "__main__":
