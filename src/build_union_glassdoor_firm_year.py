@@ -26,6 +26,8 @@ OUT_DTA = OUT_DIR / "union_glassdoor_firm_year_regression.dta"
 OUT_WIN_DTA = OUT_DIR / "union_glassdoor_firm_year_regression_winsor_1_99.dta"
 OUT_WIN_PARQUET = OUT_DIR / "union_glassdoor_firm_year_regression_winsor_1_99.parquet"
 OUT_WINSOR_LOG = OUT_DIR / "union_glassdoor_firm_year_winsorized_vars.json"
+OUT_STATA_MAP = OUT_DIR / "union_glassdoor_firm_year_regression_stata_varname_map.csv"
+OUT_WIN_STATA_MAP = OUT_DIR / "union_glassdoor_firm_year_regression_winsor_1_99_stata_varname_map.csv"
 
 MAIN_OUTCOMES = [
     "GD_rating",
@@ -96,6 +98,32 @@ RATING_BASE_SUFFIXES = [
     "GD_recommend",
 ]
 
+ROLE_PREFIX_RENAME = {
+    "role_likely_unionizable": "mayu",
+    "role_likely_excluded_from_union": "notu",
+    "role_ambiguous_union_status": "ambu",
+}
+
+STATA_TOKEN_MAP = {
+    "role_likely_unionizable": "mayu",
+    "role_likely_excluded_from_union": "notu",
+    "role_ambiguous_union_status": "ambu",
+    "gd_rating": "gdrat",
+    "gd_outlook": "gdout",
+    "gd_career_opp": "gdcar",
+    "gd_ceo": "gdceo",
+    "gd_comp_benefit": "gdcomp",
+    "gd_senior_mgmt": "gdsen",
+    "gd_wlb": "gdwlb",
+    "gd_culture": "gdcult",
+    "gd_diversity": "gddiv",
+    "gd_recommend": "gdrec",
+    "sdsic2": "sds2",
+    "sdff48": "sdf48",
+    "lag1": "l1",
+    "for1": "f1",
+}
+
 
 def print_banner(title: str) -> None:
     print("\n" + "=" * 88)
@@ -129,6 +157,27 @@ def detect_column(df: pd.DataFrame, candidates: Sequence[str], required: bool = 
 
 def find_curr_columns(df: pd.DataFrame) -> List[str]:
     return [c for c in df.columns if c.lower().endswith("_curr")]
+
+
+def rename_role_group_prefixes(df: pd.DataFrame) -> pd.DataFrame:
+    rename_map: dict[str, str] = {}
+    for col in df.columns:
+        new_col = col
+        for old, new in ROLE_PREFIX_RENAME.items():
+            new_col = new_col.replace(old, new)
+        if new_col != col:
+            rename_map[col] = new_col
+
+    if rename_map:
+        print(f"Renaming role subgroup columns to short prefixes: {len(rename_map):,}")
+        examples = list(rename_map.items())[:12]
+        print(f"Role subgroup rename examples: {examples}")
+        out = df.rename(columns=rename_map)
+        dups = out.columns[out.columns.duplicated()].tolist()
+        if dups:
+            raise ValueError(f"Column collision after role prefix rename: {dups[:10]}")
+        return out
+    return df
 
 
 def detect_rating_columns(df: pd.DataFrame) -> List[str]:
@@ -423,6 +472,9 @@ def clean_glassdoor_firm_year(gd: pd.DataFrame) -> pd.DataFrame:
     if rename_map:
         df = df.rename(columns=rename_map)
 
+    # Backward compatibility: convert long role-group variable names to short prefixes.
+    df = rename_role_group_prefixes(df)
+
     curr_cols = find_curr_columns(df)
     print(f"Detected _curr columns: {len(curr_cols):,}")
 
@@ -660,7 +712,7 @@ def summarize_final(df: pd.DataFrame) -> None:
         print(df["merge_controls"].value_counts(dropna=False))
 
 
-def make_stata_compatible(df: pd.DataFrame) -> pd.DataFrame:
+def make_stata_compatible(df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
     out = df.copy()
 
     for col in out.columns:
@@ -696,10 +748,14 @@ def make_stata_compatible(df: pd.DataFrame) -> pd.DataFrame:
 
     # Stata variable name constraints: <= 32 chars, [a-zA-Z_][a-zA-Z0-9_]*
     rename = {}
+    rows = []
     used = set()
     for c in out.columns:
         new = c.lower()
+        for old_tok, new_tok in STATA_TOKEN_MAP.items():
+            new = new.replace(old_tok, new_tok)
         new = re.sub(r"[^a-z0-9_]", "_", new)
+        new = re.sub(r"_+", "_", new).strip("_")
         if not re.match(r"^[a-z_]", new):
             new = f"v_{new}"
         new = new[:32]
@@ -712,10 +768,12 @@ def make_stata_compatible(df: pd.DataFrame) -> pd.DataFrame:
         used.add(new)
         if new != c:
             rename[c] = new
+        rows.append({"original_name": c, "stata_name": new})
     if rename:
         out = out.rename(columns=rename)
 
-    return out
+    rename_map_df = pd.DataFrame(rows)
+    return out, rename_map_df
 
 
 def winsorize_for_regression(df: pd.DataFrame) -> Tuple[pd.DataFrame, List[str]]:
@@ -749,17 +807,21 @@ def export_outputs(df: pd.DataFrame) -> None:
     df.to_parquet(OUT_PARQUET, index=False)
     print(f"Saved parquet: {OUT_PARQUET}")
 
-    stata_df = make_stata_compatible(df)
+    stata_df, stata_map = make_stata_compatible(df)
     stata_df.to_stata(OUT_DTA, write_index=False, version=118)
+    stata_map.to_csv(OUT_STATA_MAP, index=False)
     print(f"Saved Stata: {OUT_DTA}")
+    print(f"Saved Stata varname map: {OUT_STATA_MAP}")
 
     win_df, winsor_vars = winsorize_for_regression(df)
     win_df.to_parquet(OUT_WIN_PARQUET, index=False)
     print(f"Saved winsorized parquet: {OUT_WIN_PARQUET}")
 
-    win_stata = make_stata_compatible(win_df)
+    win_stata, win_stata_map = make_stata_compatible(win_df)
     win_stata.to_stata(OUT_WIN_DTA, write_index=False, version=118)
+    win_stata_map.to_csv(OUT_WIN_STATA_MAP, index=False)
     print(f"Saved winsorized Stata: {OUT_WIN_DTA}")
+    print(f"Saved winsorized Stata varname map: {OUT_WIN_STATA_MAP}")
 
     winsor_meta = {
         "winsorization": "1st and 99th percentiles",
@@ -785,6 +847,11 @@ def main() -> None:
     union_one = resolve_firm_year_elections(union_clean)
 
     gd_clean = clean_glassdoor_firm_year(gd_raw)
+    if "mayu_GD_rating" not in gd_clean.columns:
+        raise RuntimeError(
+            "Firm-year union input is missing mayu_GD_rating. "
+            "Re-run build_firm_year_aggregates.py to create role subgroup rating outcomes with short names."
+        )
     controls = prepare_controls(controls_raw)
 
     merged = merge_outcomes(union_one, gd_clean, controls)
@@ -809,11 +876,30 @@ def main() -> None:
     sdsic2_vars = [c for c in pq_df.columns if c.endswith("_sdsic2")]
     if not sdsic2_vars:
         errors.append("FAIL: No _sdsic2 standardized variables created. Check sic/sic2 availability in controls.")
-    if "role_likely_unionizable_GD_rating" not in pq_df.columns and \
-       any(c.startswith("role_likely_unionizable") for c in pq_df.columns):
-        errors.append("FAIL: role_likely_unionizable_GD_rating missing but other role columns exist — firm-year aggregation may not have created role subgroup ratings.")
-    elif not any(c.startswith("role_likely_unionizable") for c in pq_df.columns):
-        print("WARNING: role_likely_unionizable_GD_rating not in final file — firm-year aggregation step did not create role subgroup rating outcomes. Re-run build_firm_year_aggregates.py.")
+    if "mayu_GD_rating" not in pq_df.columns:
+        errors.append("FAIL: mayu_GD_rating missing in final parquet.")
+    if not any(c.startswith("mayu_GD") for c in pq_df.columns):
+        errors.append("FAIL: no mayu_GD* variables in final parquet.")
+    if any(c.startswith("role_likely_unionizable_GD") for c in pq_df.columns):
+        errors.append("FAIL: old prefix role_likely_unionizable_GD still present in final parquet.")
+    if any(c.startswith("role_likely_excluded_from_union_GD") for c in pq_df.columns):
+        errors.append("FAIL: old prefix role_likely_excluded_from_union_GD still present in final parquet.")
+    if any(c.startswith("role_ambiguous_union_status_GD") for c in pq_df.columns):
+        errors.append("FAIL: old prefix role_ambiguous_union_status_GD still present in final parquet.")
+
+    if not OUT_STATA_MAP.exists() or not OUT_WIN_STATA_MAP.exists():
+        errors.append("FAIL: Stata variable name mapping CSV files were not generated.")
+    else:
+        map_df = pd.read_csv(OUT_STATA_MAP)
+        bad_patterns = [
+            r"role_ambiguous_union_status_g_",
+            r"role_likely_excluded_from_uni_",
+            r"role_likely_unionizable_gd_",
+        ]
+        for pat in bad_patterns:
+            bad = map_df[map_df["stata_name"].str.contains(pat, regex=True, na=False)]
+            if len(bad) > 0:
+                errors.append(f"FAIL: bad unreadable Stata names still present for pattern {pat}.")
     if errors:
         print("\n" + "=" * 88)
         print("VALIDATION ERRORS:")
