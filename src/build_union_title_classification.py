@@ -16,11 +16,14 @@ INPUT_PATH = Path(
 
 OUT_DIR = Path("/data/disk4/workspace/projects/union_glassdoor/outputs")
 OUT_CLASSIFIED = OUT_DIR / "union_classified_title_universe.csv"
+OUT_PRE_STEP1C = OUT_DIR / "union_classified_title_universe_pre_step1c.csv"
 OUT_DIAG = OUT_DIR / "union_title_classification_diagnostics.json"
 OUT_PROTOCOL = OUT_DIR / "union_title_classification_protocol.md"
 OUT_AMBIG = OUT_DIR / "union_ambiguous_title_examples.csv"
 OUT_LOW_INFO = OUT_DIR / "union_low_information_title_examples.csv"
 OUT_TOP = OUT_DIR / "union_top_titles_by_reviews.csv"
+OUT_STEP1C_RECLASSIFIED = OUT_DIR / "STEP1C_RECLASSIFIED_EXAMPLES.csv"
+OUT_STEP1C_SUMMARY = OUT_DIR / "STEP1C_SUMMARY.md"
 
 
 LOW_INFO_TOKENS = {
@@ -60,34 +63,88 @@ AMBIGUOUS_STANDALONE = {
     "assistant",
 }
 
+AMBIGUOUS_ROLE_PHRASES = [
+    "sales associate",
+    "sales",
+    "sales representative",
+    "sales consultant",
+    "sales assistant",
+    "sales advisor",
+    "inside sales",
+    "outside sales representative",
+    "sales specialist",
+    "business development",
+    "business development representative",
+    "account executive",
+    "account manager",
+    "consultant",
+    "analyst",
+    "associate",
+    "specialist",
+    "assistant",
+    "coordinator",
+    "advisor",
+    "agent",
+    "officer",
+    "representative",
+]
+
+WEAK_SUPERVISORY_AMBIGUOUS = [
+    "assistant manager",
+    "shift supervisor",
+    "shift leader",
+    "team lead",
+    "team leader",
+    "lead",
+]
+
+CONFLICT_MANAGER_AMBIGUOUS_PHRASES = [
+    "production manager",
+    "customer service manager",
+    "service delivery manager",
+    "delivery manager",
+]
+
 # Retail / Store Workers
 RETAIL_UNIONIZABLE_KWS = [
     "retail sales associate",
     "sales floor associate",
+    "seasonal sales associate",
+    "part time sales associate",
+    "part-time sales associate",
     "stock associate",
+    "stocker",
+    "overnight stocker",
     "shelf stocker",
     "store associate",
     "store clerk",
     "grocery clerk",
-    "warehouse associate",
-    "fulfillment associate",
-    "picker",
-    "packer",
+    "retail assistant",
+    "shop assistant",
+    "beauty advisor",
+    "key holder",
+    "keyholder",
+    "team member",
     "cashier",
-    "sales associate",  # EXPLICIT: common retail title
 ]
 
 # Food Service
 FOOD_SERVICE_UNIONIZABLE_KWS = [
     "barista",
     "crew member",
+    "crew",
     "sandwich artist",
     "line cook",
     "prep cook",
+    "cook",
     "dishwasher",
     "server",
     "waiter",
     "waitress",
+    "host",
+    "hostess",
+    "bartender",
+    "baker",
     "food service worker",
     "busser",
     "kitchen staff",
@@ -96,75 +153,91 @@ FOOD_SERVICE_UNIONIZABLE_KWS = [
 # Logistics / Transportation
 LOGISTICS_UNIONIZABLE_KWS = [
     "package handler",
-    "delivery driver",
+    "part time package handler",
+    "part-time package handler",
+    "material handler",
+    "picker",
+    "packer",
+    "picker packer",
+    "order picker",
     "warehouse worker",
+    "warehouse associate",
+    "fulfillment associate",
+    "sortation associate",
     "dock worker",
     "loader",
     "forklift operator",
-    "material handler",
+    "delivery driver",
     "driver",
+    "truck driver",
+    "courier",
+    "ramp agent",
+    "postman",
 ]
 
 # Manufacturing
 MANUFACTURING_UNIONIZABLE_KWS = [
-    "machinist",
-    "welder",
-    "assembler",
-    "technician",
-    "mechanic",
+    "machine operator",
     "operator",
-    "laborer",
+    "production",
     "production worker",
+    "assembler",
+    "laborer",
+    "general laborer",
+    "welder",
+    "machinist",
+    "mechanic",
     "maintenance worker",
+    "maintenance technician",
     "field technician",
     "installer",
-    "maintenance technician",
+    "electrician",
+    "laborer",
 ]
 
 # Healthcare Support
 HEALTHCARE_SUPPORT_UNIONIZABLE_KWS = [
-    "nursing assistant",
     "medical assistant",
+    "certified nursing assistant",
+    "nursing assistant",
+    "cna",
     "caregiver",
     "home health aide",
     "patient care technician",
-    "nurse aide",
+    "phlebotomist",
 ]
 
 # Aviation / Hospitality
 AVIATION_HOSPITALITY_UNIONIZABLE_KWS = [
-    "flight attendant",
     "housekeeper",
     "room attendant",
-    "front desk",
+    "front desk agent",
+    "front desk receptionist",
+    "receptionist",
+    "concierge",
 ]
 
 # Banking
 BANKING_UNIONIZABLE_KWS = [
     "bank teller",
+    "teller",
 ]
 
 # Frontline / Generalist
 FRONTLINE_UNIONIZABLE_KWS = [
-    "customer service",
-    "customer support",
-    "call center",
-    "contact center",
+    "security guard",
+    "security officer",
+    "customer service representative",
+    "customer service associate",
+    "customer service agent",
+    "customer care representative",
+    "technical support representative",
+    "call center representative",
+    "contact center representative",
     "service representative",
     "clerk",
-    "receptionist",
-    "security guard",
     "janitor",
     "cleaner",
-    "hourly",
-    "line worker",
-    "logistics",
-    "fulfillment",
-    "warehouse",
-    "delivery",
-    "maintenance",
-    "production",
-    "manufacturing",
 ]
 
 # Executive / C-Suite
@@ -179,27 +252,20 @@ EXECUTIVE_EXCLUDED_KWS = [
     "vice president",
     "vp",
     "chief of staff",
+    "head of",
+    "general manager",
+    "managing director",
 ]
 
 # Managerial
 MANAGERIAL_EXCLUDED_KWS = [
-    "managing director",
-    "general manager",
-    "store manager",
     "regional manager",
     "district manager",
-    "operations manager",
     "director",
-    "manager",
-    "superintendent",
 ]
 
 # Supervisory / Leadership
 SUPERVISORY_EXCLUDED_KWS = [
-    "supervisor",
-    "foreman",
-    "lead supervisor",
-    "head of",
     "principal",
 ]
 
@@ -212,9 +278,6 @@ LEGAL_EXCLUDED_KWS = [
     "general counsel",
     "corporate counsel",
     "litigation",
-    "paralegal",
-    "law clerk",
-    "legal assistant",
 ]
 
 # HR / Employee Relations / Labor Relations
@@ -253,45 +316,37 @@ OWNER_EXCLUDED_KWS = [
     "co founder",
     "owner",
     "partner",
-    "managing partner",
-    "independent contractor",
-    "contractor",
-    "freelancer",
-    "self employed",
+    "principal",
 ]
 
 # Multilingual Keywords (Spanish)
 SPANISH_UNIONIZABLE_KWS = [
-    "vendedor",  # sales associate
-    "cajero",    # cashier
-    "operador",  # operator
-    "tecnico",   # technician
-    "conductor", # driver
-    "cocinero",  # cook
-    "mozo",      # laborer
-    "ayudante",  # helper
-    "empleado",  # employee (frontline)
+    "vendedor",
+    "cajero",
+    "operador",
+    "operador de caixa",
+    "operador de producao",
+    "operador de maquinas",
+    "motorista",
+    "recepcionista",
+    "auxiliar de producao",
+    "auxiliar de logistica",
+    "tecnico",
 ]
 
 # Multilingual Keywords (Portuguese)
 PORTUGUESE_UNIONIZABLE_KWS = [
-    "atendente",    # attendant
-    "desenvolvedor", # developer
-    "engenheiro",   # engineer
-    "operador",     # operator
-    "motorista",    # driver
-    "cozinheiro",   # cook
-    "auxiliar",     # assistant
-    "tecnico",      # technician
+    "atendente",
+    "operador",
+    "motorista",
+    "tecnico",
 ]
 
 # Multilingual Keywords (French)
 FRENCH_UNIONIZABLE_KWS = [
-    "caissier",  # cashier
-    "caissiere", # cashier (female)
-    "technicien", # technician
-    "operateur", # operator
-    "vendeur",   # sales
+    "caissier",
+    "caissiere",
+    "technicien",
 ]
 
 UNIONIZABLE_KEYWORDS = (
@@ -309,9 +364,7 @@ UNIONIZABLE_KEYWORDS = (
 )
 
 EXCLUDED_KEYWORDS = [
-    "manager",
     "director",
-    "executive",
     "vice president",
     "vp",
     "president",
@@ -324,15 +377,7 @@ EXCLUDED_KEYWORDS = [
     "head of",
     "managing director",
     "general manager",
-    "store manager",
-    "operations manager",
-    "supervisor",
-    "team lead",
-    "shift lead",
-    "technical lead",
-    "foreman",
     "principal",
-    "senior leadership",
     "attorney",
     "lawyer",
     "legal",
@@ -340,15 +385,8 @@ EXCLUDED_KEYWORDS = [
     "general counsel",
     "corporate counsel",
     "litigation",
-    "paralegal",
-    "law clerk",
-    "legal assistant",
     "human resources",
-    "hr",
-    "people operations",
-    "people partner",
     "hrbp",
-    "recruiter",
     "recruiting",
     "talent acquisition",
     "employee relations",
@@ -363,18 +401,10 @@ EXCLUDED_KEYWORDS = [
     "management consultant",
     "internal consultant",
     "chief of staff",
-    "transformation",
-    "strategic initiatives",
-    "corporate planning",
     "founder",
     "co founder",
     "owner",
     "partner",
-    "managing partner",
-    "independent contractor",
-    "contractor",
-    "freelancer",
-    "self employed",
 ]
 
 EXCLUDED_STRONG = [
@@ -385,15 +415,26 @@ EXCLUDED_STRONG = [
     "human resources",
     "labor relations",
     "employee relations",
+    "ceo",
+    "cfo",
+    "coo",
+    "cto",
+    "cio",
+    "chief",
+    "vice president",
+    "vp",
+    "head of",
+    "managing director",
+    "general manager",
+    "regional manager",
+    "district manager",
+    "director",
     "strategy",
     "corporate development",
     "founder",
     "owner",
     "partner",
-    "independent contractor",
-    "contractor",
-    "freelancer",
-    "self employed",
+    "principal",
 ]
 
 HIGH_LEVEL_PROFESSIONAL_KWS = [
@@ -439,56 +480,57 @@ OC_TECH_KWS = [
     "senior software developer",
     "developer",
     "programmer",
-    "engineer",
-    "devops",
     "data scientist",
-    "senior data scientist",
     "data engineer",
     "machine learning engineer",
     "systems engineer",
-    "solutions architect",
     "systems analyst",
-    "cybersecurity",
-    "information security",
-    "network engineer",
+    "system administrator",
+    "systems administrator",
     "database administrator",
+    "network engineer",
+    "cybersecurity analyst",
+    "information security analyst",
+    "it analyst",
     "it specialist",
     "information technology",
-    "technical support engineer",
-    "systems administrator",
-]
-
-# Analytics / Business Intelligence
-OC_ANALYTICS_KWS = [
     "business analyst",
     "data analyst",
     "financial analyst",
     "quantitative analyst",
     "research analyst",
+    "research scientist",
+    "scientist",
+    "researcher",
+    "economist",
+    "statistician",
+    "technical writer",
+    "devops",
+    "desenvolvedor",
+    "engenheiro",
+    "ingenieur",
+    "ingeniero",
+]
+
+# Analytics / Business Intelligence
+OC_ANALYTICS_KWS = [
     "business intelligence",
     "analytics",
 ]
 
 # Product / Design
 OC_PRODUCT_DESIGN_KWS = [
+    "product manager",
     "product designer",
     "ux designer",
     "ui designer",
-    "creative director",
-    "design lead",
-    "product manager",
-    "product owner",
+    "graphic designer",
+    "designer",
 ]
 
 # Research
 OC_RESEARCH_KWS = [
-    "scientist",
-    "researcher",
-    "economist",
-    "statistician",
     "research scientist",
-    "principal scientist",
-    "senior researcher",
 ]
 
 OC_TECH_KWS = OC_TECH_KWS + OC_ANALYTICS_KWS + OC_RESEARCH_KWS
@@ -501,6 +543,12 @@ OC_AMBIGUOUS_KWS = {
     "assistant",
     "support",
 }
+
+
+def _mainly_contains_phrase(title: str, phrase: str, max_tokens: int = 5) -> bool:
+    if not _phrase_to_pattern(phrase).search(title):
+        return False
+    return len(title.split()) <= max_tokens
 
 def normalize_title_text(value: object) -> str:
     """
@@ -585,13 +633,12 @@ def classify_union_dimension(title: str, row: pd.Series) -> dict[str, object]:
             "union_reason": f"low_information:{low_reason}",
         }
 
-    union_hits = matched_keywords(title, UNIONIZABLE_KEYWORDS)
-    multilingual_union = matched_keywords(title, SPANISH_UNIONIZABLE_KWS + PORTUGUESE_UNIONIZABLE_KWS + FRENCH_UNIONIZABLE_KWS)
-    if multilingual_union:
-        union_hits.extend(multilingual_union)
-
-    excluded_hits = matched_keywords(title, EXCLUDED_KEYWORDS)
-    excluded_strong_hits = matched_keywords(title, EXCLUDED_STRONG)
+    union_hits = sorted(set(matched_keywords(title, UNIONIZABLE_KEYWORDS)))
+    excluded_hits = sorted(set(matched_keywords(title, EXCLUDED_KEYWORDS)))
+    excluded_strong_hits = sorted(set(matched_keywords(title, EXCLUDED_STRONG)))
+    ambiguous_role_hits = sorted(set(matched_keywords(title, AMBIGUOUS_ROLE_PHRASES)))
+    weak_supervisory_hits = sorted(set(matched_keywords(title, WEAK_SUPERVISORY_AMBIGUOUS)))
+    conflict_manager_hits = sorted(set(matched_keywords(title, CONFLICT_MANAGER_AMBIGUOUS_PHRASES)))
 
     # Strong excluded signals
     if excluded_strong_hits:
@@ -601,31 +648,56 @@ def classify_union_dimension(title: str, row: pd.Series) -> dict[str, object]:
             "union_ambiguous": 0,
             "union_classification": "likely_excluded",
             "union_confidence": "high",
-            "union_reason": f"excluded_strong:{'|'.join(sorted(set(excluded_strong_hits)))}",
+            "union_reason": f"excluded_strong:{'|'.join(excluded_strong_hits)}",
         }
 
-    n_u = len(set(union_hits))
-    n_e = len(set(excluded_hits))
+    n_u = len(union_hits)
+    n_e = len(excluded_hits)
+
+    # Weak supervisory titles are kept ambiguous when they are the main title signal.
+    if any(_mainly_contains_phrase(title, kw) for kw in WEAK_SUPERVISORY_AMBIGUOUS):
+        return {
+            "union_likely_unionizable": 0,
+            "union_likely_excluded": 0,
+            "union_ambiguous": 1,
+            "union_classification": "ambiguous",
+            "union_confidence": "low",
+            "union_reason": f"ambiguous_weak_supervisory:{'|'.join(weak_supervisory_hits)}",
+        }
+
+    if n_u == 0 and n_e == 0 and ambiguous_role_hits:
+        return {
+            "union_likely_unionizable": 0,
+            "union_likely_excluded": 0,
+            "union_ambiguous": 1,
+            "union_classification": "ambiguous",
+            "union_confidence": "low",
+            "union_reason": f"ambiguous_generic_role:{'|'.join(ambiguous_role_hits)}",
+        }
 
     # Conflict resolution
     if n_u > 0 and n_e > 0:
-        if n_e >= n_u + 2:
+        if weak_supervisory_hits or conflict_manager_hits:
+            return {
+                "union_likely_unionizable": 0,
+                "union_likely_excluded": 0,
+                "union_ambiguous": 1,
+                "union_classification": "ambiguous",
+                "union_confidence": "low",
+                "union_reason": (
+                    "conflict_weak_supervisory_or_manager:"
+                    f"u={','.join(union_hits)};e={','.join(excluded_hits)}"
+                ),
+            }
+
+        if n_e >= 3 and n_u <= 1:
             return {
                 "union_likely_unionizable": 0,
                 "union_likely_excluded": 1,
                 "union_ambiguous": 0,
                 "union_classification": "likely_excluded",
                 "union_confidence": "medium",
-                "union_reason": f"excluded_dominates:{'|'.join(sorted(set(excluded_hits)))}",
-            }
-        if n_u >= n_e + 2:
-            return {
-                "union_likely_unionizable": 1,
-                "union_likely_excluded": 0,
-                "union_ambiguous": 0,
-                "union_classification": "likely_unionizable",
-                "union_confidence": "medium",
-                "union_reason": f"unionizable_dominates:{'|'.join(sorted(set(union_hits)))}",
+                "union_reason": f"excluded_dominates_conflict:{'|'.join(excluded_hits)}",
             }
         return {
             "union_likely_unionizable": 0,
@@ -635,18 +707,24 @@ def classify_union_dimension(title: str, row: pd.Series) -> dict[str, object]:
             "union_confidence": "low",
             "union_reason": (
                 "conflicting_signals:"
-                f"u={','.join(sorted(set(union_hits)))};e={','.join(sorted(set(excluded_hits)))}"
+                f"u={','.join(union_hits)};e={','.join(excluded_hits)}"
             ),
+        }
+
+    if conflict_manager_hits:
+        return {
+            "union_likely_unionizable": 0,
+            "union_likely_excluded": 0,
+            "union_ambiguous": 1,
+            "union_classification": "ambiguous",
+            "union_confidence": "low",
+            "union_reason": f"ambiguous_managerial_context:{'|'.join(conflict_manager_hits)}",
         }
 
     # Clear excluded signal
     if n_e > 0:
         conf = "high"
-        reason = f"excluded_keywords:{'|'.join(sorted(set(excluded_hits)))}"
-        # Generic managerial titles get medium confidence
-        if title in ["manager", "director", "supervisor"]:
-            conf = "medium"
-            reason = f"excluded_generic_managerial:{title}"
+        reason = f"excluded_keywords:{'|'.join(excluded_hits)}"
         return {
             "union_likely_unionizable": 0,
             "union_likely_excluded": 1,
@@ -664,7 +742,7 @@ def classify_union_dimension(title: str, row: pd.Series) -> dict[str, object]:
             "union_ambiguous": 0,
             "union_classification": "likely_unionizable",
             "union_confidence": "high",
-            "union_reason": f"unionizable_keywords:{'|'.join(sorted(set(union_hits)))}",
+            "union_reason": f"unionizable_keywords:{'|'.join(union_hits)}",
         }
 
     # Default: ambiguous
@@ -919,6 +997,115 @@ def build_protocol_markdown(diagnostics: dict) -> str:
     )
 
 
+def _class_counts_and_weighted(df: pd.DataFrame) -> tuple[dict[str, int], dict[str, float]]:
+    counts = df["union_classification"].value_counts(dropna=False).to_dict()
+    weighted: dict[str, float] = {}
+    if "n_reviews" in df.columns:
+        total_reviews = float(df["n_reviews"].sum())
+        if total_reviews > 0:
+            for cls in ["likely_unionizable", "likely_excluded", "ambiguous"]:
+                weighted[cls] = float(df.loc[df["union_classification"] == cls, "n_reviews"].sum()) / total_reviews
+    return counts, weighted
+
+
+def _format_markdown_table(df: pd.DataFrame, columns: list[str], n: int = 50) -> str:
+    if df.empty:
+        return "- None"
+
+    tmp = df.copy()
+    if "n_reviews" in tmp.columns:
+        tmp = tmp.sort_values(["n_reviews", "title_standardized"], ascending=[False, True])
+    else:
+        tmp = tmp.sort_values(["title_standardized"], ascending=[True])
+    tmp = tmp.head(n)
+
+    lines = ["| " + " | ".join(columns) + " |", "|" + "|".join(["---"] * len(columns)) + "|"]
+    for _, r in tmp.iterrows():
+        vals = []
+        for c in columns:
+            v = r.get(c, "")
+            if pd.isna(v):
+                vals.append("")
+            else:
+                vals.append(str(v).replace("|", "/"))
+        lines.append("| " + " | ".join(vals) + " |")
+    return "\n".join(lines)
+
+
+def build_step1c_summary(old_df: pd.DataFrame, new_df: pd.DataFrame, merged: pd.DataFrame) -> str:
+    old_counts, old_weighted = _class_counts_and_weighted(old_df)
+    new_counts, new_weighted = _class_counts_and_weighted(new_df)
+
+    amb_to_union = merged[
+        (merged["old_union_classification"] == "ambiguous")
+        & (merged["new_union_classification"] == "likely_unionizable")
+    ][["title_standardized", "n_reviews", "old_union_classification", "new_union_classification"]]
+
+    excl_to_amb = merged[
+        (merged["old_union_classification"] == "likely_excluded")
+        & (merged["new_union_classification"] == "ambiguous")
+    ][["title_standardized", "n_reviews", "old_union_classification", "new_union_classification"]]
+
+    newly_oc = merged[
+        (merged["old_oc_likely"] == 0)
+        & (merged["new_oc_likely"] == 1)
+    ][["title_standardized", "n_reviews", "old_oc_likely", "new_oc_likely", "new_oc_reason"]]
+
+    remaining_amb = new_df[new_df["union_classification"] == "ambiguous"][
+        ["title_standardized", "n_reviews", "union_reason", "oc_likely", "oc_reason"]
+    ]
+
+    return "\n".join(
+        [
+            "# STEP1C Summary",
+            "",
+            "## Rule Changes",
+            "- Removed broad unionizable signals for generic sales and technical/developer terms.",
+            "- Added narrow frontline unionizable phrase rules across retail, food service, logistics, trades, healthcare support, hospitality, and customer service.",
+            "- Added multilingual frontline rules and prevented Portuguese/Spanish technical-professional terms from being unionizable by default.",
+            "- Kept weak supervisory titles (assistant manager, shift supervisor, team lead, etc.) as ambiguous when they are the main title signal.",
+            "- Conflict handling now avoids unionizable-by-token-count behavior; strong excluded signals can win, otherwise conflict stays ambiguous.",
+            "",
+            "## Classification Counts Before/After",
+            f"- Before: likely_unionizable={old_counts.get('likely_unionizable', 0):,}, likely_excluded={old_counts.get('likely_excluded', 0):,}, ambiguous={old_counts.get('ambiguous', 0):,}",
+            f"- After: likely_unionizable={new_counts.get('likely_unionizable', 0):,}, likely_excluded={new_counts.get('likely_excluded', 0):,}, ambiguous={new_counts.get('ambiguous', 0):,}",
+            "",
+            "## Review-Weighted Shares Before/After",
+            f"- Before: likely_unionizable={old_weighted.get('likely_unionizable', 0.0):.4f}, likely_excluded={old_weighted.get('likely_excluded', 0.0):.4f}, ambiguous={old_weighted.get('ambiguous', 0.0):.4f}",
+            f"- After: likely_unionizable={new_weighted.get('likely_unionizable', 0.0):.4f}, likely_excluded={new_weighted.get('likely_excluded', 0.0):.4f}, ambiguous={new_weighted.get('ambiguous', 0.0):.4f}",
+            "",
+            "## Top 50 Ambiguous -> Likely_Unionizable",
+            _format_markdown_table(
+                amb_to_union,
+                ["title_standardized", "n_reviews", "old_union_classification", "new_union_classification"],
+                n=50,
+            ),
+            "",
+            "## Top 50 Likely_Excluded -> Ambiguous",
+            _format_markdown_table(
+                excl_to_amb,
+                ["title_standardized", "n_reviews", "old_union_classification", "new_union_classification"],
+                n=50,
+            ),
+            "",
+            "## Top 50 Newly OC_Likely",
+            _format_markdown_table(
+                newly_oc,
+                ["title_standardized", "n_reviews", "old_oc_likely", "new_oc_likely", "new_oc_reason"],
+                n=50,
+            ),
+            "",
+            "## High-Review Remaining Ambiguous Titles",
+            _format_markdown_table(
+                remaining_amb,
+                ["title_standardized", "n_reviews", "union_reason", "oc_likely", "oc_reason"],
+                n=50,
+            ),
+            "",
+        ]
+    )
+
+
 def main() -> None:
     if not INPUT_PATH.exists():
         raise FileNotFoundError(f"Missing input file: {INPUT_PATH}")
@@ -943,7 +1130,79 @@ def main() -> None:
     oc_df = pd.DataFrame(oc_rows)
     out = pd.concat([df.reset_index(drop=True), union_df, oc_df], axis=1)
 
+    old_df = None
+    if OUT_PRE_STEP1C.exists():
+        old_df = pd.read_csv(OUT_PRE_STEP1C)
+
     out.to_csv(OUT_CLASSIFIED, index=False)
+
+    if old_df is not None and "title_standardized" in old_df.columns:
+        old_keep_cols = [
+            "title_standardized",
+            "union_classification",
+            "union_reason",
+            "oc_likely",
+            "oc_reason",
+        ]
+        old_keep_cols = [c for c in old_keep_cols if c in old_df.columns]
+        old_cmp = old_df[old_keep_cols].copy().rename(
+            columns={
+                "union_classification": "old_union_classification",
+                "union_reason": "old_union_reason",
+                "oc_likely": "old_oc_likely",
+                "oc_reason": "old_oc_reason",
+            }
+        )
+
+        new_cmp = out[
+            [
+                "title_standardized",
+                "n_reviews",
+                "union_classification",
+                "union_reason",
+                "oc_likely",
+                "oc_reason",
+            ]
+        ].copy().rename(
+            columns={
+                "union_classification": "new_union_classification",
+                "union_reason": "new_union_reason",
+                "oc_likely": "new_oc_likely",
+                "oc_reason": "new_oc_reason",
+            }
+        )
+
+        merged = new_cmp.merge(old_cmp, on="title_standardized", how="left")
+
+        changed_mask = (
+            (merged["old_union_classification"].fillna("") != merged["new_union_classification"].fillna(""))
+            | (merged["old_union_reason"].fillna("") != merged["new_union_reason"].fillna(""))
+            | (merged["old_oc_likely"].fillna(-1).astype(int) != merged["new_oc_likely"].fillna(-1).astype(int))
+            | (merged["old_oc_reason"].fillna("") != merged["new_oc_reason"].fillna(""))
+        )
+
+        step1c_examples = merged.loc[
+            changed_mask,
+            [
+                "title_standardized",
+                "n_reviews",
+                "old_union_classification",
+                "new_union_classification",
+                "old_union_reason",
+                "new_union_reason",
+                "old_oc_likely",
+                "new_oc_likely",
+                "old_oc_reason",
+                "new_oc_reason",
+            ],
+        ].copy()
+
+        if "n_reviews" in step1c_examples.columns:
+            step1c_examples = step1c_examples.sort_values(["n_reviews", "title_standardized"], ascending=[False, True])
+        step1c_examples.to_csv(OUT_STEP1C_RECLASSIFIED, index=False)
+
+        step1c_summary = build_step1c_summary(old_df=old_df, new_df=out, merged=merged)
+        OUT_STEP1C_SUMMARY.write_text(step1c_summary, encoding="utf-8")
 
     ambiguous_df = out[out["union_classification"] == "ambiguous"].copy()
     if "n_reviews" in ambiguous_df.columns:
@@ -987,6 +1246,9 @@ def main() -> None:
     print(f"- {OUT_AMBIG}")
     print(f"- {OUT_LOW_INFO}")
     print(f"- {OUT_TOP}")
+    if old_df is not None and "title_standardized" in old_df.columns:
+        print(f"- {OUT_STEP1C_RECLASSIFIED}")
+        print(f"- {OUT_STEP1C_SUMMARY}")
 
 
 if __name__ == "__main__":
