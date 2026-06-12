@@ -132,6 +132,9 @@ outputs/rdd_rebuild/
     └── figures/
 ```
 
+### Backups
+- README backups and other pre-update snapshots are stored in `backups/`
+
 ### Important Notes
 - Do NOT use old window365 file as the main RDD sample
 - Use rebuilt raw-data RDD sample for current analyses
