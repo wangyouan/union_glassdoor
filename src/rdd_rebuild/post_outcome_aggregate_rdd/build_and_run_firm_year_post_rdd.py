@@ -54,20 +54,25 @@ def build_event_dataset(emp_sample):
 def assign_versions(ev):
     """Assign multi-election versions A, B, C."""
     ev = ev.copy()
-    ev["version"] = "A"
-    # Version B: isolated (no other election within +/-365 days)
-    for gv, grp in ev.groupby("gvkey"):
+    # Step 1: deduplicate to election-level for version assignment
+    elec_info = ev[["election_id","gvkey","election_date"]].drop_duplicates()
+    elec_info["version"] = "A"
+    # Version B: elections isolated from any other same-gvkey election within +/-365d
+    for gv, grp in elec_info.groupby("gvkey"):
         dates = grp["election_date"].values
+        eids = grp["election_id"].values
         for i, d in enumerate(dates):
             others = np.delete(dates, i)
-            if len(others) == 0 or np.min(np.abs((others - d).astype("timedelta64[D]").astype(float))) > 365:
-                idx = grp.index[i]
-                ev.loc[idx, "version"] = "B"
+            if len(others) == 0:
+                elec_info.loc[grp.index[i], "version"] = "B"
+            elif np.min(np.abs((others - d).astype("timedelta64[D]").astype(float))) > 365:
+                elec_info.loc[grp.index[i], "version"] = "B"
     # Version C: first election per gvkey
-    first_idx = ev.groupby("gvkey")["election_date"].idxmin()
-    # Add C tag (keep A/B also)
-    # Actually C overrides — we need separate subsets, so just tag
-    ev["is_first"] = ev.index.isin(first_idx)
+    first_eids = elec_info.groupby("gvkey")["election_date"].idxmin()
+    elec_info["is_first"] = elec_info.index.isin(first_eids)
+    # Merge back
+    ev = ev.drop(columns=["version","is_first"], errors="ignore").merge(
+        elec_info[["election_id","version","is_first"]], on="election_id", how="left")
     return ev
 
 def run_ols(data, outcome, bw_label, bw_fn, poly, fe_spec, fe_cols):
