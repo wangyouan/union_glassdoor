@@ -103,6 +103,13 @@ CONFLICT_MANAGER_AMBIGUOUS_PHRASES = [
     "customer service manager",
     "service delivery manager",
     "delivery manager",
+    # STEP1D Fix 2 & 3: roles miscaught by EXCLUDED_STRONG
+    "product owner",          # Scrum IC role, not NLRA supervisor
+    "legal assistant",        # support staff, typically unionizable
+    "legal secretary",        # support staff, typically unionizable
+    "legal clerk",            # support staff, typically unionizable
+    "legal receptionist",
+    "legal coordinator",
 ]
 
 # Retail / Store Workers
@@ -437,6 +444,13 @@ EXCLUDED_STRONG = [
     "principal",
 ]
 
+# STEP1D Fix 1: principal + IC role = ambiguous (not excluded)
+PRINCIPAL_IC_OVERRIDE_KWS = [
+    "engineer", "scientist", "architect", "developer", "designer",
+    "analyst", "researcher", "consultant", "specialist", "technician",
+    "cashier", "cajero",
+]
+
 HIGH_LEVEL_PROFESSIONAL_KWS = [
     "software engineer",
     "software developer",
@@ -464,8 +478,7 @@ OC_MANAGEMENT_KWS = [
     "chief",
     "head of",
     "supervisor",
-    "team lead",
-    "shift lead",
+    # STEP1D Fix 4: "team lead" and "shift lead" removed — frontline supervisory, not OC
     "operations manager",
     "project manager",
     "program manager",
@@ -642,6 +655,27 @@ def classify_union_dimension(title: str, row: pd.Series) -> dict[str, object]:
 
     # Strong excluded signals
     if excluded_strong_hits:
+        # STEP1D Fix 1: principal + IC role override
+        if "principal" in excluded_strong_hits:
+            if any(kw in title for kw in PRINCIPAL_IC_OVERRIDE_KWS):
+                return {
+                    "union_likely_unionizable": 0,
+                    "union_likely_excluded": 0,
+                    "union_ambiguous": 1,
+                    "union_classification": "ambiguous",
+                    "union_confidence": "medium",
+                    "union_reason": f"principal_ic_override:{'|'.join(excluded_strong_hits)}",
+                }
+        # STEP1D Fix 2+3: CONFLICT_MANAGER_AMBIGUOUS overrides EXCLUDED_STRONG
+        if any(kw in title for kw in CONFLICT_MANAGER_AMBIGUOUS_PHRASES):
+            return {
+                "union_likely_unionizable": 0,
+                "union_likely_excluded": 0,
+                "union_ambiguous": 1,
+                "union_classification": "ambiguous",
+                "union_confidence": "medium",
+                "union_reason": f"conflict_ambiguous_override:{'|'.join(excluded_strong_hits)}",
+            }
         return {
             "union_likely_unionizable": 0,
             "union_likely_excluded": 1,
