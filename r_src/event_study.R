@@ -22,7 +22,7 @@ CL <- ~gvkey+review_year
 OUTCOMES <- c("wlb","comp_benefit","overall_rating","culture","senior_mgmt")
 
 run_es <- function(y){
-  f <- as.formula(paste0(y," ~ i(event_q, win, ref=-1) + win + post:margin + emp_status + seniority_f | gvkey + review_year + state_clean + role_clean + event_q"))
+  f <- as.formula(paste0(y," ~ i(event_q, win, ref=-1) + win + post:margin + emp_status + seniority_f | gvkey + review_year + event_q"))
   fit <- feols(f, data=df, cluster=CL, warn=FALSE, notes=FALSE)
   ct <- as.data.frame(coeftable(fit)); ct$term <- rownames(ct)
   dyn <- ct[grepl("event_q::.*:win", ct$term), ]
