@@ -1,0 +1,12 @@
+suppressMessages({library(fixest); library(dplyr); library(nanoparquet)})
+OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260622/current_sweep/"
+source(paste0(OUT,"cur_helpers.R"))
+cur <- prep(read_parquet(paste0(OUT,"current_base.parquet")))
+cat("Data ready:", nrow(cur), "rows\n")
+ids <- elig(cur, "each", 5)
+d <- filter(cur, election_id %in% ids)
+cat("N=5 filter:", nrow(d), "reviews,", n_distinct(d$election_id), "elections\n")
+t0 <- Sys.time()
+f <- feols(v7c("wlb"), d, cluster=CL, warn=FALSE, notes=FALSE)
+cat("Done in", round(difftime(Sys.time(),t0,units="secs"),1),"s\n")
+print(coeftable(f)["win_post",])
