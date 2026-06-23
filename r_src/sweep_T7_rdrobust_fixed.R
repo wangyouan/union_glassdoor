@@ -18,7 +18,7 @@ run_rd <- function(d, y) {
 
   if(nrow(agg) < 20) return(tibble(tau_conv=NA, se_conv=NA, p_conv=NA, tau_bc=NA, se_rob=NA, p_rob=NA, h=NA, n_eff=NA, n_elec=nrow(agg)))
 
-  rr <- tryCatch(rdrobust(y=agg$delta, x=agg$margin, c=0, kernel="triangular", bwselect="mserd"),
+  rr <- tryCatch(rdrobust(y=agg$delta, x=agg$margin, c=0, kernel="triangular", p=2, q=3, bwselect="mserd"),
                  error=function(e) NULL)
 
   if(is.null(rr)) return(tibble(tau_conv=NA, se_conv=NA, p_conv=NA, tau_bc=NA, se_rob=NA, p_rob=NA, h=NA, n_eff=NA, n_elec=nrow(agg)))
@@ -26,6 +26,7 @@ run_rd <- function(d, y) {
   tibble(
     tau_conv = safe(rr$coef, "Conventional"),  se_conv = safe(rr$se, "Conventional"), p_conv = safe(rr$pv, "Conventional"),
     tau_bc   = safe(rr$coef, "Bias-Corrected"), se_rob  = safe(rr$se, "Robust"),      p_rob  = safe(rr$pv, "Robust"),
+    p = 2L, q = 3L,
     h = rr$bws["h","left"], n_eff = sum(rr$N_h), n_elec = nrow(agg))
 }
 
@@ -46,7 +47,7 @@ for(t in THR){
 res <- bind_rows(rows) |>
   mutate(sig_conv = cut(p_conv, c(-Inf,.01,.05,.10,Inf), labels=c("***","**","*","")),
          sig_rob  = cut(p_rob,  c(-Inf,.01,.05,.10,Inf), labels=c("***","**","*",""))) |>
-  select(filter, outcome, tau_conv, se_conv, p_conv, sig_conv, tau_bc, se_rob, p_rob, sig_rob, h, n_eff, n_elec)
+  select(filter, outcome, tau_conv, se_conv, p_conv, sig_conv, tau_bc, se_rob, p_rob, sig_rob, p, q, h, n_eff, n_elec)
 
 write_csv(res, fp)
 message("saved ", fp, " (", nrow(res), " rows)")
