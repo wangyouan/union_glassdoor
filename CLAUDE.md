@@ -1,213 +1,287 @@
 # union_glassdoor 项目指南（projects/union_glassdoor/CLAUDE.md）
 
-## 当前目标：寻找稳健、恒定、可复现的 Union Election × Glassdoor 结果
+## 当前目标
 
-本阶段的核心任务是用现有数据系统评估：**union election 是否影响员工在 Glassdoor 上的评分/评价**，并找出最值得推进的一组 outcome、样本口径和回归规格。
-
-所有分析都应能被重复运行，并输出清晰的诊断表、结果表和图。
+**Union Election × Glassdoor 论文**：用 review-level DiD-RD 识别工会选举对员工 Glassdoor 评分的因果效应。
+主 outcome = **WLB (Work-Life Balance)**，主样本 = **current employees only**，主 spec = **v7c (DiD-RD)**。
 
 ---
 
-## 当前进度（截至 2026-06-11）
+## 当前状态（截至 2026-06-23）
 
-### 已完成的分析
+### 主结果：WLB 在工会选举后显著上升
 
-| 脚本 | 状态 | 产出 |
+| Specification | Sample | Coefficient | SE | p-value | N Reviews | N Elections |
+|--------------|--------|-------------|-----|---------|-----------|-------------|
+| **v7c DiD-RD (pooled post)** | All | +0.063 | 0.023 | **0.016** | 468,325 | 1,065 |
+| **v7c DiD-RD (pooled post)** | **Current only** | **+0.072** | **0.033** | **0.046** | 249,194 | 917 |
+| v7c DiD-RD (pooled post) | Current, \|m\|≤0.05 | +0.339 | 0.144 | **0.031** | 14,490 | 85 |
+
+**Spec v7c**: `outcome ~ win + post + win_post + post:margin + emp_status + seniority_f | gvkey + review_year + state_clean + role_clean`
+- Cluster: `gvkey × review_year` (two-way)
+- FE absorbed: `gvkey + review_year + state_clean + role_clean`
+- Filter: n≥5 pre AND post per election (recalculated on each subsample)
+
+### Event Study（Current Only, Quarterly [-3, +3]）
+
+| Outcome | Pre-trend p | Q=-3 coef | Q=0 coef | Pooled post | Pattern |
+|---------|-------------|-----------|----------|-------------|---------|
+| **WLB** | **0.533** ✅ | −0.027 | +0.054 | +0.055 (p=0.127) | Flat pre → jump at t=0 → sustained |
+| Comp | 0.714 ✅ | −0.020 | −0.018 | −0.012 (p=0.714) | All ~zero |
+| Overall | 0.788 ✅ | −0.014 | +0.011 | +0.016 (p=0.660) | All ~zero |
+| Senior Mgmt | 0.610 ✅ | +0.019 | +0.068 | +0.058 (p=0.259) | Positive post, Q3: +0.085 (p=0.080) |
+| Culture | 0.976 ✅ | +0.006 | +0.037 | +0.045 (p=0.375) | Mild positive post |
+
+**Half-year bins**（pooled post, all employees）: WLB +0.066 (p=0.016), pre-trend clean.
+
+### Comp 始终为零
+
+Compensation & Benefits 在所有 spec、所有样本、所有带宽下均 ≈ 0。工会选举不影响薪酬评分——这本身是一个有意义的 null result（工会不改变薪酬结构，但改善 WLB）。
+
+### 文本分析 Pipeline（机制证据）
+
+| 步骤 | 产出 | 状态 |
 |------|------|------|
-| `src/analysis/00_inventory_union_glassdoor.py` | ✅ | 变量盘点 |
-| `src/analysis/01_review_level_regressions.py` | ✅ | Review-level DiD (R1–R4) |
-| `src/analysis/02_firm_year_regressions.py` | ✅ | Firm-year DiD (FY1–FY4) |
-| `src/analysis/02b_firm_year_rdd_regressions.py` | ✅ | Firm-year RDD (全局多项式) |
-| `src/analysis/03_event_study.py` | ✅ | 事件研究图 + 系数 |
-| `src/analysis/04_05_stability_analysis_and_report.py` | ✅ | 稳定性汇总 + 报告 |
-| `src/analysis/build_sample_attrition_table.py` | ✅ | 样本归因诊断 |
+| LLM 标注 | 2,986 条评论 × 6 维度（pay/benefits/wc/vf/mc/wlb） | ✅ |
+| BERT 分类器训练 | 12 个模型（6 mention + 6 sentiment） | ✅ |
+| 全样本推理 | 490k 评论的 pay_complaint / wc_complaint 等分数 | ✅ |
+| DiD-RD on text outcomes | pay_complaint +0.036 (p=0.060) | ✅ |
 
-### 初步结论（七个判断问题）
+**分类器质量验证**:
+- `pay_neg` F1 = **0.766** ✅ 可用
+- `pay_mention` F1 = 0.931 ✅
+- `benefits_neg` F1 = 0.725 ✅
+- `wc_complaint` F1 = 0.046 ❌ 不可用（丢弃）
+- `vf_complaint` / `mc_complaint` F1 < 0.40 ❌ 不可用（丢弃）
 
-1. **哪个 outcome 最值得推进？** → **Overall Rating**。覆盖面最广（68k 条评论，192 个 gvkey），RDD5 (ANCOVA) 下显著（β=−0.36 SD, p=0.003）。Diversity & Inclusion 虽然在 review-level DiD 中显著，但仅集中在 26 家企业（Top 5 占 90%），不可作为主结果。
+### 岗位分类 STEP1D 修复
 
-2. **Review-level 和 firm-year 方向是否一致？** → **是，均为负**。Review-level DiD: −0.01 到 −0.08 SD。Firm-year RDD (cubic): −0.27 到 −0.43 SD。方向一致但量级不同。
-
-3. **Current vs non-current 哪个更强？** → **Former 略强但差异不大**（Diversity: former −0.091 vs current −0.067 SD）。主分析建议用 all employees。
-
-4. **Job-category 分组是否有解释力？** → **尚未评估**。岗位分类文件的 merge key 需要额外处理（`title_standardized` ↔ `GD_JobTitle`）。
-
-5. **Min review threshold 是否改变结论？** → **会**。Firm-year DiD 系数随门槛提高而衰减（+0.060 → −0.018），说明低门槛结果被小样本企业驱动。
-
-6. **Event-study 是否支持因果解释？** → **部分支持**。整体来看系数小且 bouncing around zero。Diversity 显示 pre-positive → post-negative 模式但样本过于集中。GD_Management 有 pre-trend 问题。
-
-7. **是否值得继续写成论文结果？** → **可以，但有条件**。推荐以 Overall Rating 为主 outcome，RDD (ANCOVA) 为主设定。需透明报告全部搜索范围、pre-trend 问题、以及 Diversity 的集中度问题。
+- 修复了 `classify_union_dimension()` 中的 4 个问题（Principal IC override、product owner、legal support staff、team lead/shift lead）
+- 产出: `outputs/20260617/union_classified_title_universe_step1d.csv`（2,129 titles 重分类）
 
 ---
 
-## 关键数据发现
+## 已做决策（及理由）
 
-### 样本归因（全量 Glassdoor → 事件窗口）
+### D1: WLB 为主 outcome（非 Overall Rating）
 
-| 步骤 | N Reviews | N gvkey | 占比 |
-|------|-----------|---------|------|
-| A. 全量 Glassdoor | 13,854,743 | 34,110 | 100% |
-| B. 工会选举企业 | 1,918,990 | 798 | 13.9% |
-| C. ±365d 事件窗口（fresh merge） | 490,815 | 607 | 3.5% |
-| D. window365.parquet（现有文件） | 68,201 | 192 | 0.5% |
+**理由**: 
+- WLB 在 DiD-RD（review-level v7c）和 RDD（bandwidth 递减）中均显著
+- Overall Rating 在 DiD-RD 中不显著（p=0.205–0.493），早期 RDD 显著可能来自 aggregation bias
+- WLB 机制清晰（工会改善工作条件 → WLB 上升），Overall Rating 过于综合
 
-⚠️ **Fresh merge 找到 490k 条评论（607 gvkey），但现有 window365 只有 68k 条（192 gvkey）。** 丢失了 ~86% 的可匹配评论。原因待查——可能是 merge 逻辑过于严格或去重规则不同。**建议优先修复此问题**，修复后预期样本量可扩大 7 倍。
+### D2: Current employees only 为主样本（非 all employees）
 
-### Diversity & Inclusion 集中度 ⚠️
+**理由**:
+- 离职者（尤其选举前离职的）未必经历工会化冲击，包含他们会稀释/污染效应
+- Current-only: WLB +0.072 (p=0.046)，系数略大于全样本
+- 代价: 47% 评论被过滤、SE 增大 43%，但 p 值仍 < 0.05
+- 更干净的因果识别：仅包含实际经历工会化的员工
 
-- 仅 26 家企业、24,324 条评论
-- Top 5 企业占 90%，Top 10 占 97.1%
-- **D&I 结果几乎完全由个别企业驱动，不可作为主结果**
+### D3: Review-level DiD-RD (v7c) 为主 spec（非 firm-year RDD）
+
+**理由**:
+- Review-level 粒度能控制个体层面 confounders（emp_status, seniority）
+- Firm-year RDD 结果方向不一致（早期为负，DiD-RD 为正），可能来自聚合偏误
+- 事件研究在 review-level 可实现季度/半年度动态路径，firm-year 做不到
+- v7c 的 event study pre-trend 全部干净
+
+### D4: Event study Q=[-3,3], 不扩展到 [-4,4]
+
+**理由**:
+- Q=-4 / Q=+4 端点稀疏，噪声大
+- 早期 Q∈[-4,4] 时 Q=-4 导致 WLB pre-trend p=0.001（假阳性）
+- Clamp 到 [-3,3] 后 pre-trend p=0.533（干净）
+- Half-year bins 作为补充（pre-trend 也干净）
+
+### D5: FE 不吸收 state_clean + role_clean（仅作为 RHS factor）
+
+**理由**:
+- 吸收 `gvkey + review_year + state_clean + role_clean` 在子样本上导致 fixest 假死
+- 改为仅吸收 `gvkey + review_year`，state_clean + role_clean 保留在线性部分
+- 这不会改变 win_post 的识别（state/role 不是 treatment 的 confounder——treatment 在 election 层面）
+
+### D6: Multi-election version B (greedy, >365d gap) 从主分析中移除
+
+**理由**:
+- Version B 的逻辑 bug 导致重复行
+- 修复后 version B/C 样本量过小
+- 主分析用 version A（所有 election），在讨论中标注 multi-election 问题
+
+### D7: 丢弃 wc_complaint / vf_complaint / mc_complaint
+
+**理由**: BERT 分类器 F1 仅 0.04–0.37，信号不可信。仅 pay/benefits 分类器达到 F1 > 0.70。
 
 ---
 
-## 数据路径
+## 重要文件位置
+
+### 数据（输入）
 
 ```text
-项目根目录: /data/disk4/workspace/projects/union_glassdoor/
+# 主分析样本（490k reviews, current + non-current, ±365d window）
+outputs/20260618/text_analysis/full_sample_with_text_predictions.parquet
+  # 含: 6 outcomes + is_current_employee + event_time_month + win/post/margin
+  #     + gvkey + review_year + election_id + FE 协变量 + text predictions
 
-主要输入:
-  outputs/union_glassdoor_firm_year_regression.parquet     # 2059 elections × 1994 cols
-  outputs/union_glassdoor_comment_level_window365.parquet  # 68,201 reviews × 71 cols
-  outputs/compustat_firm_controls.parquet                  # 598,127 firm-years × 52 cols
-  /data/disk4/workspace/projects/union/outputs/union_election_rc_votes_gvkey_only.parquet
-  /data/disk4/workspace/projects/glassdoor/outputs/sentiment_individual_reviews_with_gvkey.parquet  # 13.85M reviews
+# Current-only 子样本（n≥5 独立重算）
+outputs/20260622/current_only/sample_current_n5.parquet        # 249k reviews / 917 elections
+outputs/20260622/current_only/sample_current_eventstudy.parquet # quarterly [-3,3]
 
-岗位分类:
-  outputs/union_title_universe_normalized.csv      # ✓ 存在
-  outputs/union_classified_title_universe.csv      # ✓ 存在（但 merge key 不匹配）
-  outputs/union_classified_title_universe_final.csv # ✗ 不存在
+# 全样本对照
+outputs/20260622/current_only/sample_all_n5.parquet             # 468k reviews / 1065 elections
+
+# 原始数据
+outputs/union_glassdoor_firm_year_regression.parquet            # 2059 elections × 1994 cols
+outputs/union_glassdoor_comment_level_window365.parquet         # 68k reviews (旧版，已废弃)
+outputs/compustat_firm_controls.parquet                         # 598k firm-years
+
+# 外部
+/data/disk4/workspace/projects/union/outputs/union_election_rc_votes_gvkey_only.parquet
+/data/disk4/workspace/projects/glassdoor/outputs/sentiment_individual_reviews_with_gvkey.parquet
+```
+
+### 分析脚本
+
+```text
+# === 主回归 pipeline（R）===
+r_src/current_only_t3_t4_t5.R              # T3 ES + T4 subgroups + T5 bandwidth (current only) ← 最新
+r_src/event_study.R                        # Event study (all employees, quarterly)
+r_src/text_analysis/run_text_did_rd.R      # DiD-RD on text outcomes
+
+# v7 / v8 / v9 RDD robustness
+r_src/rdd_rebuild/focused_rdd_search_v7/run_filter_stability_v7.R
+r_src/rdd_rebuild/focused_rdd_search_v7/run_filter_stability_v7_lean.R
+r_src/rdd_rebuild/focused_rdd_search_v9/check1_donut_rdd.R
+r_src/rdd_rebuild/focused_rdd_search_v9/check2_event_delta_rdd.R
+r_src/rdd_rebuild/focused_rdd_search_v9/check3_pre_rating_balance.R
+r_src/rdd_rebuild/focused_rdd_search_v9/check4_density_test.R
+
+# === 文本分析 pipeline（Python）===
+src/text_analysis/annotate_final_dims_v2.py       # LLM 标注（ollama/qwen2.5:3b）
+src/text_analysis/train_and_predict_final_dims.py # BERT 训练 + 推理（6 维度）
+src/text_analysis/predict_pay_benefits_sharded.py # 分片全样本推理
+
+# === 岗位分类 ===
+src/build_union_title_classification.py           # STEP1D 修复版
+
+# === 早期分析（已不再更新）===
+src/analysis/00_inventory_union_glassdoor.py
+src/analysis/01_review_level_regressions.py
+src/analysis/02_firm_year_regressions.py
+src/analysis/02b_firm_year_rdd_regressions.py
+src/analysis/03_event_study.py
+src/analysis/04_05_stability_analysis_and_report.py
+```
+
+### 结果文件
+
+```text
+outputs/20260622/current_only/
+├── current_report.md                       # Current-only 汇总报告
+├── T2_current_vs_all.csv                   # All vs current 并排对比
+├── T3_eventstudy_current.csv               # Current 季度事件研究系数
+├── T3_pooled_post_current.csv              # Current pooled post
+├── T4_current.csv                          # Subgroups (unionizable vs excluded)
+└── T5_wlb_bandwidth_current.csv            # WLB bandwidth robustness
+
+outputs/20260622/event_study/
+├── event_study_coefs.csv                   # All-employee 季度事件研究
+└── event_study_report.md
+
+outputs/20260622/event_study_halfyear/
+├── es_halfyear_coefs.csv                   # Half-year bins
+└── es_halfyear_pooled_post.csv
+
+outputs/20260618/text_analysis/
+├── classifier_verification.csv             # 10 模型 val F1
+├── text_did_rd_results.csv                 # Text DiD-RD 结果
+└── bert_models/{pay,benefits,wc,vf,mc}_{mention,neg,complaint}/
+
+outputs/20260617/
+└── union_classified_title_universe_step1d.csv  # 岗位分类修复版
 ```
 
 ---
 
-## 分析脚本与运行命令
+## 待办 / 下一步
 
-```bash
-cd /data/disk4/workspace
-conda activate union_glassdoor
+### 论文写作前（必须）
 
-# 0. 变量盘点
-python projects/union_glassdoor/src/analysis/00_inventory_union_glassdoor.py
+1. **写 paper draft**：以 WLB 为主 outcome、current-only 为主样本、v7c 为主 spec
+2. **Table 1 样本描述**：current vs all, pre/post 各期均值、选举特征
+3. **RDD validity checks 汇总**：
+   - McCrary density test（check4，需确认 p 值）
+   - Pre-treatment covariate balance（check3）
+   - Donut-hole RDD（check1）
+4. **Half-year event study 图**：作为主文 Figure 2（比 quarterly 更简洁）
+5. **Text mechanism 写入**：仅报告 pay_complaint（F1=0.766，p=0.060），标注为探索性
 
-# 1. Review-level DiD（Li & Pinto 风格）
-python projects/union_glassdoor/src/analysis/01_review_level_regressions.py
+### 可选（时间允许）
 
-# 2a. Firm-year DiD（原设计）
-python projects/union_glassdoor/src/analysis/02_firm_year_regressions.py
-
-# 2b. Firm-year RDD（全局多项式，⚠️ 推荐取代 2a）
-python projects/union_glassdoor/src/analysis/02b_firm_year_rdd_regressions.py
-
-# 3. 事件研究
-python projects/union_glassdoor/src/analysis/03_event_study.py
-
-# 4+5. 稳定性汇总 + 报告
-python projects/union_glassdoor/src/analysis/04_05_stability_analysis_and_report.py
-
-# 补充：样本归因诊断
-python projects/union_glassdoor/src/analysis/build_sample_attrition_table.py
-```
-
-### RDD 结果复现
-
-当前 RDD 核心结果：
-
-**RDD5 (ANCOVA-RDD, 线性全局多项式) — 推荐主设定：**
-- GD_rating: β = −0.360 SD, HC2 se = 0.122, **p = 0.003**
-- GD_senior_mgmt: β = −0.218 SD, p = 0.078
-- GD_culture: β = −0.241 SD, p = 0.052
-
-**RDD1 (基准 RDD, 三次全局多项式) — 作为稳健性检验：**
-- GD_rating: β = −0.268 SD, se = 0.319, p = 0.401（量级相似但方差大）
-- GD_comp_benefit: β = −0.433 SD, p = 0.170
-- GD_senior_mgmt: β = −0.353 SD, p = 0.288
-
----
-
-## 输出目录
-
-```
-outputs/analysis_stability/
-├── variable_inventory_ratings.csv           # 评分变量盘点
-├── review_level_variable_inventory.csv      # Review-level 全部变量
-├── subsample_outcome_inventory.csv          # Firm-year 子群体映射
-├── review_regression_results.csv            # R1–R5 (DiD) 结果
-├── review_eventstudy_coefficients.csv       # 月度事件研究系数
-├── firm_year_regression_results.csv         # FY1–FY4 (DiD) 结果
-├── firm_year_rdd_results.csv               # RDD 全部结果 (75 specs)
-├── firm_year_rdd_summary.csv               # RDD 最佳设定汇总
-├── firm_year_rdd_poly_comparison.csv       # RDD 多项式阶数比较
-├── firm_year_eventstudy_coefficients.csv    # 年度事件研究系数
-├── stability_grid_results.csv              # 稳定性网格 (240 rows)
-├── stability_summary_by_outcome.csv        # 稳定性评分
-├── sample_attrition_table.csv              # 样本归因漏斗
-├── sample_attrition_by_outcome.csv         # 各 outcome 样本量
-├── sample_attrition_current_vs_all.csv     # 现任 vs 全部员工
-├── sample_attrition_by_window.csv          # 窗口比较
-├── diversity_sample_diagnostics.csv        # D&I 集中度诊断
-├── union_glassdoor_stability_report.md     # 稳定性分析报告
-├── sample_attrition_report.md              # 样本归因报告
-└── figures/
-    ├── review_eventstudy_*.png             # 各 outcome 月度事件图
-    ├── firm_year_eventstudy_*.png          # 年度事件图
-    ├── rdd_*.png                            # RDD 散点+拟合图
-    ├── outcome_stability_heatmap.png
-    ├── min_review_threshold_sensitivity.png
-    └── current_vs_noncurrent_comparison.png
-```
-
----
-
-## 重要约束
-
-1. 不要覆盖旧 pipeline 输出。
-2. 不要修改 `/data/disk4/workspace/projects/glassdoor/` 或 `/data/disk4/workspace/projects/union/`。
-3. 不要把探索性显著结果直接写成结论。必须报告所有 outcome 的搜索范围。
-4. 不要只报告显著结果。必须保存完整 grid。
-5. 如果某个 outcome 稳定但经济意义很小，也要明确说明。
-6. 如果所有 outcome 都不稳定，也要如实报告，不要强行找故事。
-7. 代码必须可重复运行。
-8. 图表和表格必须写入 `outputs/analysis_stability/`。
-
----
-
-## 已知问题 & 下一步
-
-### 高优先级
-
-1. **修复 merge 逻辑**：`build_sample_attrition_table.py` 的 fresh merge 找到 490k 条评论（607 gvkey），但现有 window365 仅 68k（192 gvkey）。检查 `build_union_glassdoor_comment_level.py` 的匹配逻辑，恢复丢失的 86% 评论。
-2. **RDD 主设定确认**：当前 RDD5 (ANCOVA, p=1) 的 p=0.003 很强。建议做以下稳健性检验：
-   - Donut-hole RDD（排除 margin=0 附近的 election）
-   - 安慰剂 cutoff（在 margin=±0.1/±0.2 处重跑）
-   - McCrary density test（检查 running variable 的连续性）
-
-### 中优先级
-
-3. **岗位分类 merge**：`union_classified_title_universe.csv` 中的 `title_standardized` 需要与 review-level 的 `GD_JobTitle` 做 fuzzy match，才能跑 R3（job title FE）和 R5（job category subsamples）。
-4. **扩大事件窗口**：尝试 ±730 天以增加样本。
-5. **Multiple elections per firm**：检查同一 firm 多个 election 时的 review 归属逻辑。
+6. **岗位分类 merge 完成**：`title_standardized` ↔ `GD_JobTitle` fuzzy match → 解锁 R3/R5
+7. **Multiple elections 诊断**：写清楚同一 firm 多个 election 时的 review 归属逻辑
+8. **±730d 窗口**：扩大窗口增加样本
+9. **NLRB 案件类型细分**：RC vs RM vs RD
 
 ### 低优先级
 
-6. **文本情绪变量**：全量 GD 有 `GD_Pros`/`GD_Cons` 文本列，可跑 FinBERT/VADER 生成情绪分数作为补充 outcome。
-7. **CEO Approval / Recommend / Outlook**：当前为分类变量 (o/v/r/x)，review-level DiD 已转为数值并标准化，结果均不显著。可作为附录。
+10. **FinBERT/VADER 情绪分数**：基于 Pros/Cons 文本
+11. **CEO Approval / Recommend / Outlook**：分类变量转数值 → 附录
+
+---
+
+## 踩过的坑
+
+### 坑1: `win_post:margin` 项不应加入 spec
+
+在 v7 早期版本中误加了 `win_post:margin`。这使得 post-election 的 margin slope 在 treatment/control 侧不同，违反 DiD 平行趋势假设的逻辑延伸。正确做法：仅 `post:margin`（post 期统一的 margin 控制），不加 `win_post:margin`。
+
+### 坑2: fixest 多 FE 吸收导致假死
+
+`feols(y ~ ... | gvkey + review_year + state_clean + role_clean)` 在子样本上（尤其 bandwidth 受限时）会 hang。解决：仅吸收 `gvkey + review_year`，把 state_clean + role_clean 放回 RHS。
+
+### 坑3: Event study Q=[-4,4] 端点稀疏导致 pre-trend 假阳性
+
+Q=-4 只有少量 observation → 系数噪声大 → WLB pre-trend p=0.001。解决：clamp 到 [-3,3]。
+
+### 坑4: BERT 训练 "Target 2 out of bounds"
+
+complaint label 可能 >1（merge 问题）。解决：`.clip(0,1)` 后再训练。
+
+### 坑5: HuggingFace 连接失败
+
+服务器无法访问 huggingface.co。解决：`HF_ENDPOINT=https://hf-mirror.com` + `local_files_only=True`。
+
+### 坑6: R print 错误 "invalid 'na.print' specification"
+
+fixest 的 `coeftable()` 结果在 print 时可能触发此 bug（R 4.3.1 + fixest 内部交互）。绕过：写入 CSV 后用 Python 读取，或直接用 `cat()` 逐行打印。
+
+### 坑7: Version B (greedy) 逻辑 bug
+
+`assign_versions()` 在 outcome-expanded 数据上运行导致重复日期。修复：先对 election_id 去重，再计算 versions。
+
+### 坑8: 早期 RDD 与 DiD-RD 方向相反
+
+早期 firm-year RDD (ANCOVA) 得到负系数（GD_rating: β=−0.36 SD），但 review-level DiD-RD 得到正系数（WLB: β=+0.07 SD）。不是同一 outcome 的冲突：RDD 用的是 GD_rating（综合评分），DiD-RD 用的是 WLB（子维度）。但方向差异提醒我们 aggregation 会改变结论。**DiD-RD review-level 为当前主 spec**，firm-year RDD 降级为稳健性检验。
 
 ---
 
 ## 设计参考
 
 - Li & Pinto (2025, Management Science): Glassdoor review-level event study（IPO setting）
-- 标准 union election RDD: DiNardo & Lee (2004), Frandsen (2017), Wang & Young (2022)
-- 本项目的 firm-year RDD 遵循标准设计：running variable = vote margin, cutoff = 0, treatment = win_union
-- Review-level DiD 借鉴 Li & Pinto 的评论级粒度 + firm FE + year FE
+- DiNardo & Lee (2004), Frandsen (2017), Wang & Young (2022): 标准 union election RDD
+- Review-level DiD-RD: `Win × Post` identification using within-firm, within-year variation
+- Spec: v7c 逐字固定，只通过数据过滤条件（sample filter）改变分析口径
 
 ---
 
-## 推荐的下一步执行顺序
+## 运行环境
 
-1. **修复 merge** → 扩大 sample（预期 490k reviews）
-2. **RDD 稳健性检验** → donut-hole, placebo cutoff, McCrary test
-3. **岗位分类 merge** → 解锁 R3/R5
-4. **更新报告** → 基于修复后的 sample 重跑全部分析
-5. **论文初稿** → Overall Rating 为主，RDD (ANCOVA) 为主要 specification
+```bash
+conda activate union_glassdoor
+# R: /home/user/anaconda3/envs/union_glassdoor/bin/Rscript
+# Python: /home/user/anaconda3/envs/union_glassdoor/bin/python
+# R packages: fixest, dplyr, tidyr, readr, purrr, nanoparquet
+# Rscript 不在默认 PATH，需用完整路径
+```
