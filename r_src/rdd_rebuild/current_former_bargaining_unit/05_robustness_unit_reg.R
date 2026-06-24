@@ -6,7 +6,7 @@
 
 suppressMessages({library(fixest); library(dplyr); library(tidyr); library(nanoparquet); library(readr)})
 
-OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/rdd_rebuild/current_former_bargaining_unit/20260624/"
+OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/"
 
 df <- read_parquet(paste0(OUT, "enriched_sample.parquet"))
 df$sample_type <- ifelse(df$is_current_employee == 1, "current",

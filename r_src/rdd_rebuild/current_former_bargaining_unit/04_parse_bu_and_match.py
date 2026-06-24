@@ -17,7 +17,7 @@ import pandas as pd
 import numpy as np
 import re, os
 
-OUT = "/data/disk4/workspace/projects/union_glassdoor/outputs/rdd_rebuild/current_former_bargaining_unit/20260624"
+OUT = "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624"
 os.makedirs(OUT, exist_ok=True)
 
 # ─── Load data ──────────────────────────────────────────────────────────────
