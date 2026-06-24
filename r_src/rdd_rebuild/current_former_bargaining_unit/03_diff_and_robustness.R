@@ -5,7 +5,7 @@
 
 suppressMessages({library(fixest); library(dplyr); library(tidyr); library(nanoparquet); library(readr); library(purrr)})
 
-OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/"
+OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/current_former_bargaining_unit/"
 
 df <- read_parquet(paste0(OUT, "enriched_sample.parquet"))
 cat("Loaded:", nrow(df), "rows\n")

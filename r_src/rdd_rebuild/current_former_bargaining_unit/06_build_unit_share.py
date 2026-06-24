@@ -4,7 +4,7 @@
 import pandas as pd
 import numpy as np
 
-OUT = "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624"
+OUT = "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/current_former_bargaining_unit"
 
 # Load NLRB unit data
 nlrb = pd.read_parquet("/data/disk4/workspace/projects/union/outputs/preliminary_election_level.parquet",

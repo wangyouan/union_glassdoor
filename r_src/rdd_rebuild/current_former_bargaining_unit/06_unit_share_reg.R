@@ -4,7 +4,7 @@
 
 suppressMessages({library(fixest); library(dplyr); library(tidyr); library(nanoparquet); library(readr)})
 
-OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/"
+OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260624/current_former_bargaining_unit/"
 PYTHON_BIN <- "/home/user/anaconda3/envs/union_glassdoor/bin/python"
 
 # ─── STEP 10: Build unit_share via Python ────────────────────────────────
