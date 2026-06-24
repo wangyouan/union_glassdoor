@@ -1,0 +1,1 @@
+- [Output naming convention](output-naming-convention.md) — outputs go to outputs/YYYYMMDD/, not nested subdirectories
