@@ -3,7 +3,7 @@
 library(fixest); library(dplyr); library(tidyr); library(readr); library(nanoparquet)
 options(fixest_notes=FALSE); setFixest_notes(FALSE)
 
-OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/rdd_rebuild/firmyear_unionization/finished_panel/"
+OUT <- "/data/disk4/workspace/projects/union_glassdoor/outputs/20260703/firmyear_unionization/finished_panel/"
 
 cat("Loading merged panel...\n")
 df <- nanoparquet::read_parquet(paste0(OUT,"merged_panel_main.parquet"))
